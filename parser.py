@@ -27,8 +27,12 @@ RE_NONTERMINAL = re.compile(r'(\$[a-zA-Z_]*)')
 
 class ParseResult:
     def __str__(self):
-        if self.val == []: return self.key
-        return '(%s %s)' % (self.key, ''.join([str(i) for i in self.val]))
+        if self.val == None: return self.key
+        return ''.join([str(i) for i in self.val])
+
+    def __repr__(self):
+        if self.val == None: return self.key
+        return '<%s %s>' % (self.key, ''.join([repr(i) for i in self.val]))
 
 class NoParse(ParseResult):
     def __bool__(self): return False
@@ -67,7 +71,7 @@ def unify_line(rule, grammar, text, tfrom):
         else:
             if text[tfrom:].startswith(part):
                 till = tfrom + len(part)
-                results.append(KeyMatch(part, tfrom, till, []))
+                results.append(KeyMatch(part, tfrom, till, None))
                 tfrom = till
             else: return RuleMatch(val=[], till=0)
     return RuleMatch(val=results, till=tfrom)
