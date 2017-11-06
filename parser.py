@@ -25,20 +25,35 @@ term_grammar = {
 
 RE_NONTERMINAL = re.compile(r'(\$[a-zA-Z_]*)')
 
-class ParseResult: pass
+class ParseResult:
+    def __str__(self):
+        if self.val == []: return self.key
+        return '(%s %s)' % (self.key, ''.join([str(i) for i in self.val]))
 
 class NoParse(ParseResult):
     def __bool__(self): return False
 
-class Parsed(ParseResult):
+class KeyMatch(ParseResult):
     def __init__(self, key, frm, til, val): self.key, self.frm, self.til, self.val = key, frm, til, val
 
-    def __str__(self): return '%s[%s]' % (self.key, ''.join([str(i) for i in self.val]))
-
-PResult = collections.namedtuple('PResult', 'val till')
+class RuleMatch(ParseResult):
+    def __init__(self, val, till): self.val, self.till = val, till
 
 def is_symbol(x): return x[0] == '$'
 
+def memoize(targnum):
+    def fn_wrap(function):
+        memo = {}
+        def wrapper(*args):
+            lst = (args[i] for i in targnum)
+            if lst in memo: return memo[lst]
+            rv = function(*args)
+            memo[lst] = rv
+            return rv
+        return wrapper
+    return fn_wrap
+
+@memoize((0,2,3))
 def unify_line(rule, grammar, text, tfrom):
     parts = [s for s in re.split(RE_NONTERMINAL, rule) if s]
     results = []
@@ -46,16 +61,16 @@ def unify_line(rule, grammar, text, tfrom):
         part, *parts = parts
         if is_symbol(part):
             res = unify_key(part, grammar, text, tfrom)
-            if not res: return PResult(val=[], till=0)
+            if not res: return RuleMatch(val=[], till=0)
             results.append(res)
             tfrom = res.til
         else:
             if text[tfrom:].startswith(part):
                 till = tfrom + len(part)
-                results.append(Parsed(part, tfrom, till, []))
+                results.append(KeyMatch(part, tfrom, till, []))
                 tfrom = till
-            else: return PResult(val=[], till=0)
-    return PResult(val=results, till=tfrom)
+            else: return RuleMatch(val=[], till=0)
+    return RuleMatch(val=results, till=tfrom)
 
 
 # returns (key, from, till,val)}
@@ -66,7 +81,7 @@ def unify_key(key, grammar, text, tfrom=0):
     for rule in rules:
         ret = unify_line(rule, grammar, text, tfrom)
         if not ret.val: continue # PEG
-        return Parsed(key, tfrom, ret.till, ret.val)
+        return KeyMatch(key, tfrom, ret.till, ret.val)
     return NoParse()
 
 def using(fn):
