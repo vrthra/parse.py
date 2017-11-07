@@ -57,7 +57,6 @@ def memoize(targnum):
         return wrapper
     return fn_wrap
 
-@memoize((0,2,3))
 def unify_line(rule, grammar, text, tfrom):
     parts = [s for s in re.split(RE_NONTERMINAL, rule) if s]
     results = []
@@ -78,6 +77,7 @@ def unify_line(rule, grammar, text, tfrom):
 
 
 # returns (key, from, till,val)}
+@memoize((0,2,3))
 def unify_key(key, grammar, text, tfrom=0):
     rules = grammar[key]
 
