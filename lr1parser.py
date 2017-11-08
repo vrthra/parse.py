@@ -12,34 +12,38 @@ log.basicConfig( stream=sys.stdout, level=log.DEBUG )
 
 def parse(input_text, grammar, registry):
     """
+    >>> State.reset()
     >>> g = {}
     >>> g['$S']  = ['$E']
-    >>> g['$E']  = ['$T$Ex']
-    >>> g['$Ex'] = ['+$T$Ex','']
-    >>> g['$T'] = ['$F$Tx']
-    >>> g['$Tx'] = ['*$F$Tx', '']
-    >>> g['$F'] = ['($E)', '11']
-
-    TODO
-    >> State.construct_states(g, start='$S')
-    >> text = "11"
-    >> parse(text, g, State.registry)
+    >>> g['$E']  = ['$T+$E', '$T']
+    >>> g['$T']  = ['1']
+    >>> s1 = State.construct_states(g, start='$S')
+    >>> text = "11"
+    >>> parse(text, g, State.registry)
+    >>> State.reset()
     """
     expr_stack = []
-    state_stack = [registry[0]]
+    state_stack = [registry[1]]
     tokens = list(input_text)
-    while tokens or len(expr_stack) > 1:
-        next_token, *tokens = tokens
+    next_token = None
+    while True:
+        if not next_token:
+            next_token, *tokens = tokens
+        print("token: %s" % next_token)
         # use the next_token on the state stack to decide what to do.
-        top_stack = state_stack[0]
-        nxt_state = top_stack.shift[next_token]
-        if nxt_state:
+        next_state = state_stack[0].shift_to(next_token)
+        if next_state:
             # this means we can shift.
             expr_stack.append(next_token)
-            state_stack.append(nxt_state)
+            state_stack.append(next_state)
+            print("shift to (%d):\n%s" % (len(state_stack), next_state))
+            next_token = None
         else: # TODO go_tos
-            pline = top_stack.can_reduce(next_token)
+            pline = state_stack[0].can_reduce(next_token)
             if pline:
+               # Remove the matched topmost L symbols (and parse trees and
+               # associated state numbers) from the parse stack.
+                print("pline:%s" % pline)
                 # pop the plines' rhs symbols off the stack
                 pnum = len(pline.tokens)
                 popped = expr_stack[-pnum:]
@@ -47,12 +51,14 @@ def parse(input_text, grammar, registry):
                 # push the lhs symbol of pline
                 expr_stack.append(pline.key)
                 # pop the same number of states.
+                print("pop off:%d" % pnum)
                 state_stack = state_stack[:-pnum]
-                t = top_stack.go_tos[pline.key]
-                assert t is not None
-                state_stack.append(t) # XXX null t here.
+                next_state = state_stack[0].go_tos[pline.key] # TODO: next_staet shoudl be thehead of pline
+                assert next_state is not None
+                state_stack.append(next_state) # XXX null t here.
+                print("go to (%d):\n%s" % (len(state_stack), next_state))
             else:
-                if next_token == '$' and state.accept():
+                if state_stack[0].accept():
                     break
                 else:
                     raise Exception("Can not accept %s" % next_token)
@@ -63,13 +69,12 @@ def parse(input_text, grammar, registry):
 
 
 def initialize(grammar, start):
-    pline.PLine.init_cache(g, follow(grammar, start, {}))
     State.construct_states(grammar, start='$S')
-    log.debug("States:")
-    for skey in State.registry.keys():
-        s = State.registry[skey]
-        log.debug(s)
-    log.debug('')
+    # log.debug("States:")
+    # for skey in State.registry.keys():
+    #    s = State.registry[skey]
+    #    log.debug(s)
+    # log.debug('')
 
 def using(fn):
     with fn as f: yield f
@@ -77,13 +82,13 @@ def using(fn):
 my_grammar = {}
 my_grammar['$S'] = ['$E']
 my_grammar['$E']  = ['$T + $E', '$T']
-my_grammar['$T'] = ['11']
+my_grammar['$T'] = ['1']
 
 def main(args):
     to_parse, = [f.read().strip() for f in using(open(args[1], 'r'))]
     grammar = my_grammar
-    initialize(grammar, start)
-    parse("11", grammar, State.registry)
+    initialize(grammar, '$S')
+    parse("1+1", grammar, State.registry)
 
 if __name__ == '__main__':
     main(sys.argv)

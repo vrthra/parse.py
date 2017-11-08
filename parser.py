@@ -47,7 +47,7 @@ def parse(input_text, grammar, registry):
         next_token, *tokens = tokens
         # use the next_token on the state stack to decide what to do.
         top_stack = state_stack[0]
-        nxt_state = top_stack.shift_to(next_token)
+        nxt_state = top_stack.shift[next_token]
         if nxt_state:
             # this means we can shift.
             expr_stack.append(next_token)
@@ -63,7 +63,7 @@ def parse(input_text, grammar, registry):
                 expr_stack.append(pline.key)
                 # pop the same number of states.
                 state_stack = state_stack[:-pnum]
-                t = top_stack.go_to(pline.key)
+                t = top_stack.go_tos[pline.key]
                 assert t is not None
                 state_stack.append(t) # XXX null t here.
             else:
@@ -133,7 +133,7 @@ def first(tok, grammar):
                 res |= set([''])
     return res
 
-def follow(tok, grammar, start='$START', fdict={}):
+def follow(grammar, start='$START', fdict={}):
     """
     >>> g = {}
     >>> g['$E']  = ['$T$Ex']
@@ -141,19 +141,18 @@ def follow(tok, grammar, start='$START', fdict={}):
     >>> g['$T'] = ['$F$Tx']
     >>> g['$Tx'] = ['*$F$Tx', '']
     >>> g['$F'] = ['($E)', '11']
-    >>> fdict = {}
-    >>> sorted(follow('$E', g, '$E', fdict))
+    >>> fdict = follow(g, '$E', {})
+    >>> sorted(fdict['$E'])
     ['$', ')']
-    >>> sorted(follow('$Ex', g, '$E', fdict))
+    >>> sorted(fdict['$Ex'])
     ['$', ')']
-    >>> sorted(follow('$T', g, '$E', fdict))
+    >>> sorted(fdict['$T'])
     ['$', ')', '+']
-    >>> sorted(follow('$Tx', g, '$E', fdict))
+    >>> sorted(fdict['$Tx'])
     ['$', ')', '+']
-    >>> sorted(follow('$F', g, '$E', fdict))
+    >>> sorted(fdict['$F'])
     ['$', ')', '*', '+']
     """
-    if fdict.get(tok): return fdict[tok]
     # First put $ (the end of input marker) in Follow(S) (S is the start symbol)
     fdict = fdict or {k:set() for k in grammar.keys()}
 
@@ -190,7 +189,7 @@ def follow(tok, grammar, start='$START', fdict={}):
             if val:
                cont = True
                fdict[k] |= val
-    return fdict[tok]
+    return fdict
 
 class Token: pass
 class Dollar(Token):
@@ -235,15 +234,38 @@ def symbols(grammar):
 
 
 class PLine:
-    registry = {}
-    def __init__(self, key, tokens, cursor, lookahead=set(), grammar=None, pnum=0):
-        self.key,self.tokens,self.cursor,self.lookahead,self.grammar=key,tokens,cursor,lookahead,grammar
+    cache = {}
+    counter = 0
+    fdict = None
+    def __init__(self, key, production, cursor=0, lookahead=set(), pnum=0):
+        self.key,self.production,self.cursor,self.lookahead = key,production,cursor,lookahead
+        self.tokens = PLine.split_production_str(self.production)
         self.pnum = 0
 
     @classmethod
-    def register(cls, oid, obj):
-        cls.registry[obj] = oid
-        obj.pnum = oid
+    def init_cache(cls, grammar, fdict):
+        pnum = PLine.counter
+        PLine.fdict = fdict
+        for key in grammar.keys():
+            for production in grammar[key]:
+                PLine.cache[(key, production, 0)] = PLine(key, production, 0, lookahead=fdict[key])
+                PLine.counter += 1
+        return len(PLine.cache.keys())
+
+    @classmethod
+    def get(cls, key, production, cursor):
+        val = PLine.cache.get((key, production, cursor))
+        if val: return val
+
+        seed = PLine.cache.get((key, production, 0))
+        val = cls(key, production, cursor, seed.lookahead, seed.pnum)
+        PLine.cache[(key, production, cursor)] = val
+
+        return val
+
+    @classmethod
+    def from_seed(cls, obj, cursor):
+        return PLine.get(obj.key, obj.production, cursor)
 
     def production_number(self):
         return self.pnum
@@ -273,8 +295,9 @@ class PLine:
         >>> g['$S'] = ['$E']
         >>> g['$E'] = ['$T + $E', '$T']
         >>> g['$T'] = ['1']
-        >>> pl = PLine.split_production_str('$E')
-        >>> c = State.create_lr0_closure(PLine(key='$S', tokens=pl, cursor=0), 0, g)
+        >>> PLine.init_cache(g, State.update_follow_dicts(g, '$S', {}))
+        4
+        >>> c = State.lr1_closure([PLine.get(key='$S', production='$E', cursor=0)], 0, g)
         >>> et(str(c[0]))
         '[p0]: $S -> $E  cursor: 0 @'
         >>> et(str(c[0].advance()))
@@ -292,8 +315,7 @@ class PLine:
         if self.cursor >= len(self.tokens):
             return '', None
         token = self.at(self.cursor)
-        return token, PLine(self.key, self.tokens, self.cursor+1, self.lookahead, self.grammar, self.pnum)
-
+        return token, PLine.from_seed(self, self.cursor+1)
     def at(self, cursor):
         return self.tokens[cursor]
 
@@ -305,11 +327,14 @@ class State:
         cls.counter = 0
         cls.registry = {}
 
-    def __init__(self, plines, cursor):
+    def __init__(self, plines, cursor, sfrom=None):
         self.plines, self.cursor = plines, cursor
         self.shifts = {}
         self.go_tos = {}
         self.i = State.counter
+        if sfrom:
+            self.grammar = sfrom.grammar
+            self.start = sfrom.start
         State.counter += 1
         State.registry[self.i] = self
 
@@ -320,14 +345,14 @@ class State:
     def __repr__(self): return str(self)
 
     @staticmethod
-    def lr1_closure(closure, cursor, grammar, start, fdict):
+    def lr1_closure(closure, cursor, grammar):
         """
         >>> g = {}
         >>> g['$S'] = ['$E']
         >>> g['$E'] = ['$T + $E', '$T']
         >>> g['$T'] = ['1']
-        >>> pl = PLine.split_production_str('$E')
-        >>> c = State.lr1_closure([PLine(key='$S', tokens=pl, cursor=0)], 0, g, '$S', {})
+        >>> PLine.init_cache(g, State.update_follow_dicts(g, '$S', {}))
+        >>> c = State.lr1_closure([PLine.get(key='$S', production='$E', cursor=0)], 0, g)
         >>> c = [et(str(l)) for l in c]
         >>> len(c)
         4
@@ -356,92 +381,17 @@ class State:
             if token in seen: continue
             if is_nonterminal(token):
                 for ps in grammar[token]:
-                    tokens = PLine.split_production_str(ps)
-                    pl = PLine(key=token, tokens=tokens, cursor=0, lookahead=follow(token, grammar, start, fdict))
+                    pl = PLine.get(key=token, production=ps, cursor=0)
                     items.append(pl)
                     closure.append(pl)
                     seen.add(pl.key)
         return closure
 
     @staticmethod
-    def create_lr0_closure(start, cursor, grammar):
-        """
-        >>> g = {}
-        >>> g['$S'] = ['$E']
-        >>> g['$E'] = ['$T + $E', '$T']
-        >>> g['$T'] = ['1']
-        >>> pl = PLine.split_production_str('$E')
-        >>> c = State.create_lr0_closure(PLine(key='$S', tokens=pl, cursor=0), 0, g)
-        >>> c = [et(str(i)) for i in c]
-        >>> len(c)
-        4
-        >>> c[0]
-        '[p0]: $S -> $E  cursor: 0 @'
-        >>> c[1]
-        '[p1]: $E -> $T + $E  cursor: 0 @'
-        >>> c[2]
-        '[p2]: $E -> $T  cursor: 0 @'
-        >>> c[3]
-        '[p3]: $T -> 1  cursor: 0 @'
-        >>> State.reset()
-        """
-        # get non-terminals following start.cursor
-        # a) Add the item itself to the closure
-        pline_counter = 0
-        closure = [start]
-        items = [start]
-        seen = set()
-        seen.add(start.key)
-        PLine.register(pline_counter, start)
-        pline_counter += 1
-        # c) Repeat (b, c) for any new items added under (b).
-        while items:
-            item, *items = items
-            # b) For any item in the closure, A :- α . β γ where the next symbol
-            # after the dot is a nonterminal, add the production rules of that
-            # symbol where the dot is before the first item
-            # (e.g., for each rule β :- γ, add items: β :- . γ
-            token = item.at(cursor)
-            if token in seen: continue
-            if is_nonterminal(token):
-                for ps in grammar[token]:
-                    tokens = PLine.split_production_str(ps)
-                    pl = PLine(key=token, tokens=tokens, cursor=0)
-                    items.append(pl)
-                    closure.append(pl)
-                    PLine.register(pline_counter, pl)
-                    pline_counter += 1
-                    seen.add(pl.key)
-        return closure
-
-    @staticmethod
-    def to_lr1(lr0_items, start, grammar, fdict):
-        """
-        attach lookahead from follow sets to each item.
-        >>> g = {}
-        >>> g['$S'] = ['$E']
-        >>> g['$E'] = ['$T', '($E)']
-        >>> g['$T'] = ['1', '+$T', '$T+1']
-        >>> pl = PLine.split_production_str('$E')
-        >>> fdict = {}
-        >>> c = State.to_lr1(State.create_lr0_closure(PLine(key='$S', tokens=pl, cursor=0), 0, g), '$S', g, fdict)
-        >>> c = [et(str(i)) for i in c]
-        >>> c[0]
-        '[p0]: $S -> $E  cursor: 0 @$'
-        >>> c[1]
-        '[p1]: $E -> $T  cursor: 0 @$)'
-        >>> c[2]
-        '[p2]: $E -> ($E)  cursor: 0 @$)'
-        >>> c[3]
-        '[p3]: $T -> 1  cursor: 0 @$)+1'
-        >>> c[4]
-        '[p4]: $T -> +$T  cursor: 0 @$)+1'
-        >>> c[5]
-        '[p5]: $T -> $T+1  cursor: 0 @$)+1'
-        """
-        for item in lr0_items:
-            item.lookahead = follow(item.key, grammar, start, fdict)
-        return lr0_items
+    def update_follow_dicts(grammar, start, fdict):
+        # we need only non-terminals for follow. For all others, there is no
+        # reason to look up.
+        return follow(grammar, start, fdict)
 
     @classmethod
     def construct_initial_state(cls, grammar, start='$START'):
@@ -450,6 +400,8 @@ class State:
         >>> g['$S'] = ['$E']
         >>> g['$E'] = ['$T + $E', '$T']
         >>> g['$T'] = ['1']
+        >>> PLine.init_cache(g, State.update_follow_dicts(g, '$S', {}))
+        7
         >>> s = State.construct_initial_state(g, start='$S')
         >>> l = [et(str(l)) for l in s.plines]
         >>> len(l)
@@ -466,12 +418,19 @@ class State:
         """
         key = start
         production_str = grammar[key][0]
-        tokens = PLine.split_production_str(production_str) + [Dollar()]
         cursor = 0
-        lr0_items = State.create_lr0_closure(start=PLine(key=key, tokens=tokens, cursor=cursor), cursor=0, grammar=grammar)
-        fdict = {}
-        lr1_items = State.to_lr1(lr0_items, start=start, grammar=grammar, fdict=fdict) # add the look ahead.
-        return cls(lr1_items, cursor)
+
+        pl = PLine.get(key=key, production=production_str, cursor=0)
+        pl.tokens.append(Dollar())
+
+        lr1_items = State.lr1_closure(closure=[pl],
+                cursor=0,
+                grammar=grammar)
+
+        state =  cls(lr1_items, cursor)
+        # seed state
+        state.start, state.grammar = start, grammar
+        return state
 
     def go_to(self, token):
         if self.go_tos.get(token): return self.go_tos[token]
@@ -481,7 +440,7 @@ class State:
             if token == tadv:
                 new_plines.append(new_pline)
         if not new_plines: return None
-        s = State(new_plines, self.cursor + 1)
+        s = State(plines=new_plines, cursor=(self.cursor + 1), sfrom=self)
         self.go_tos[token] = s
         return s
 
@@ -491,6 +450,7 @@ class State:
         >>> g['$S'] = ['$E']
         >>> g['$E'] = ['$T', '($E)']
         >>> g['$T'] = ['1', '+$T', '$T+1']
+        >>> PLine.init_cache(g, State.update_follow_dicts(g, '$S', {}))
         >>> s = State.construct_initial_state(g, start='$S')
         >>> et(str(s.shift_to('$T')))
         'State(1):  [p0]: $E -> $T  cursor: 1 @$) [p0]: $T -> $T+1  cursor: 1 @$)+1'
@@ -498,7 +458,6 @@ class State:
         'State(2):  [p0]: $S -> $E.$  cursor: 1 @$'
         >>> State.reset()
         """
-        # each time we shift, we have to build a new closure.
         if self.shifts.get(token): return self.shifts[token]
         new_plines = []
         for pline in self.plines:
@@ -506,8 +465,15 @@ class State:
             if token == tadv:
                 new_plines.append(new_pline)
         if not new_plines: return None
-        s = State(new_plines, self.cursor + 1)
+        # each time we shift, we have to build a new closure, with cursor at 0
+        # for the newly added rules.
+        s = self.form_closure(new_plines)
         self.shifts[token] = s
+        return s
+
+    def form_closure(self, plines):
+        closure = State.lr1_closure(closure=plines, cursor=0, grammar=self.grammar)
+        s = State(plines=plines, cursor=(self.cursor + 1), sfrom=self)
         return s
 
     def accept(self):
@@ -533,6 +499,8 @@ class State:
         >>> g['$S'] = ['$E']
         >>> g['$E'] = ['$T', '$T + $E']
         >>> g['$T'] = ['1']
+        >>> PLine.init_cache(g, State.update_follow_dicts(g, '$S', {}))
+        7
         >>> s = State.construct_states(g, '$S')
         >>> len(State.registry)
         6
@@ -550,8 +518,10 @@ class State:
         8
         >>> State.reset()
         """
+
         state1 = State.construct_initial_state(grammar, start)
         states = [state1]
+        follow = {}
         while states:
             state, *states = states
             for key in sorted(symbols(grammar)): # needs terminal symbols too.
@@ -562,6 +532,15 @@ class State:
                     new_state = state.go_to(key)
                     if new_state: states.append(new_state)
         return state1
+
+def initialize(grammar, start):
+    PLine.init_cache(g, State.update_follow_dicts(grammar, start, {}))
+    State.construct_states(grammar, start='$S')
+    log.debug("States:")
+    for skey in State.registry.keys():
+        s = State.registry[skey]
+        log.debug(s)
+    log.debug('')
 
 def using(fn):
     with fn as f: yield f
@@ -574,12 +553,7 @@ my_grammar['$T'] = ['11']
 def main(args):
     to_parse, = [f.read().strip() for f in using(open(args[1], 'r'))]
     grammar = my_grammar
-    State.construct_states(grammar, start='$S')
-    log.debug("States:")
-    for skey in State.registry.keys():
-        s = State.registry[skey]
-        log.debug(s)
-    log.debug('')
+    initialize(grammar, start)
     parse("11", grammar, State.registry)
 
 if __name__ == '__main__':

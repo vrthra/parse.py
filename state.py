@@ -14,6 +14,7 @@ class State:
         self.shifts = {}
         self.go_tos = {}
         self.i = State.counter
+        self.row = []
         self.note = "*"
         if sfrom:
             self.grammar = sfrom.grammar
@@ -35,7 +36,7 @@ class State:
 
 
     def __str__(self):
-        return "State(%s %s):\n\t%s" % (self.note, self.i, "\n\t".join([str(i) for i in self.plines]))
+        return "State(%s):\n\t%s" % (self.i, "\n\t".join([str(i) for i in self.plines]))
 
     def __repr__(self): return str(self)
 
@@ -182,27 +183,48 @@ class State:
         state1 = State.construct_initial_state(grammar, start)
         states = [state1]
         follow = {}
+        all_states = []
         seen = set()
         while states:
             state, *states = states
+            all_states.append(state)
             for key in sorted(symbols(grammar)): # needs terminal symbols too.
                 if is_terminal(key):
                     new_state = state.shift_to(key)
                     if new_state and new_state.key not in seen:
                         states.append(new_state)
                         seen.add(new_state.key)
+                        state.row.append((key,'Shift', new_state.i))
+                    else:
+                        state.row.append((key,'_', None))
                 else:
                     new_state = state.go_to(key)
                     if new_state and new_state.key not in seen:
                         states.append(new_state)
                         seen.add(new_state.key)
+                        state.row.append((key,'Goto', new_state.i))
+                    else:
+                        state.row.append((key,'_', None))
+        for state in all_states:
+            # for each item, with an LR left of Dollar, add an accept.
+            # for each item, with an LR with dot at the end, add a reduce
+            # r p
+            for line in state.plines:
+                if line.at(line.cursor) == Dollar():
+                    key = '$'
+                    state.row.append((key, 'Accept', None))
+                elif line.cursor + 1 > len(line.tokens):
+                    for key in line.lookahead:
+                        state.row.append((key, 'Reduce', line.key))
         return state1
 
 if __name__ == '__main__':
   State.reset()
   g = {}
   g['$S'] = ['$E']
-  g['$E'] = ['$T + $E', '$T']
+  g['$E'] = ['$T+$E', '$T']
   g['$T'] = ['1']
   s = State.construct_states(g, start='$S')
+  for k,s in State.registry.items():
+      print(k, s.row)
   State.reset()
