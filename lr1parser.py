@@ -31,37 +31,36 @@ def parse(input_text, grammar, registry):
             next_token, *tokens = tokens
         print("token: %s" % next_token)
         # use the next_token on the state stack to decide what to do.
-        next_state = state_stack[0].shift_to(next_token)
-        if next_state:
+        (action, nxt) = state_stack[0].hrow[next_token]
+        if action == 'Shift':
+            next_state = nxt
             # this means we can shift.
             expr_stack.append(next_token)
             state_stack.append(next_state)
             print("shift to (%d):\n%s" % (len(state_stack), next_state))
             next_token = None
-        else: # TODO go_tos
-            pline = state_stack[0].can_reduce(next_token)
-            if pline:
-               # Remove the matched topmost L symbols (and parse trees and
-               # associated state numbers) from the parse stack.
-                print("pline:%s" % pline)
-                # pop the plines' rhs symbols off the stack
-                pnum = len(pline.tokens)
-                popped = expr_stack[-pnum:]
-                expr_stack = expr_stack[:-pnum]
-                # push the lhs symbol of pline
-                expr_stack.append(pline.key)
-                # pop the same number of states.
-                print("pop off:%d" % pnum)
-                state_stack = state_stack[:-pnum]
-                next_state = state_stack[0].go_tos[pline.key] # TODO: next_staet shoudl be thehead of pline
-                assert next_state is not None
-                state_stack.append(next_state) # XXX null t here.
-                print("go to (%d):\n%s" % (len(state_stack), next_state))
-            else:
-                if state_stack[0].accept():
-                    break
-                else:
-                    raise Exception("Can not accept %s" % next_token)
+        elif action == 'Reduce':
+            pline = nxt
+            # Remove the matched topmost L symbols (and parse trees and
+            # associated state numbers) from the parse stack.
+            print("pline:%s" % pline)
+            # pop the plines' rhs symbols off the stack
+            pnum = len(pline.tokens)
+            popped = expr_stack[-pnum:]
+            expr_stack = expr_stack[:-pnum]
+            # push the lhs symbol of pline
+            expr_stack.append(pline.key)
+            # pop the same number of states.
+            print("pop off:%d" % pnum)
+            state_stack = state_stack[:-pnum]
+            (action, next_state) = state_stack[0].hrow[pline.key] # TODO: next_staet shoudl be thehead of pline
+            print("action:%s" % action)
+            state_stack.append(next_state)
+            print("go to (%d):\n%s" % (len(state_stack), next_state))
+        elif action == 'Goto':
+            print("Xaction:%s" % action)
+        elif action == 'Accept':
+            print("Yaction:%s" % action)
 
     assert len(expr_stack) == 1
     return expr_stack[0]

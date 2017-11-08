@@ -15,6 +15,7 @@ class State:
         self.go_tos = {}
         self.i = State.counter
         self.row = []
+        self.hrow = {}
         self.note = "*"
         if sfrom:
             self.grammar = sfrom.grammar
@@ -142,7 +143,7 @@ class State:
                 return True
         return False
 
-    def can_reduce(self, nxt_tok):
+    def get_reduction(self, nxt_tok):
         # is the cursor at the end in any of the plines?
         for pline in self.plines:
             if pline.cursor + 1 >= len(pline.tokens):
@@ -195,16 +196,21 @@ class State:
                         states.append(new_state)
                         seen.add(new_state.key)
                         state.row.append((key,'Shift', new_state.i))
+                        state.hrow[key] = ('Shift', new_state.i)
                     else:
                         state.row.append((key,'_', None))
+                        state.hrow[key] = ('_', None)
                 else:
                     new_state = state.go_to(key)
                     if new_state and new_state.key not in seen:
                         states.append(new_state)
                         seen.add(new_state.key)
                         state.row.append((key,'Goto', new_state.i))
+                        state.hrow[key] = ('Goto', new_state)
                     else:
                         state.row.append((key,'_', None))
+                        state.hrow[key] = ('_', None)
+
         for state in all_states:
             # for each item, with an LR left of Dollar, add an accept.
             # for each item, with an LR with dot at the end, add a reduce
@@ -213,9 +219,11 @@ class State:
                 if line.at(line.cursor) == Dollar():
                     key = '$'
                     state.row.append((key, 'Accept', None))
+                    state.hrow[key] = ('Accept', None)
                 elif line.cursor + 1 > len(line.tokens):
                     for key in line.lookahead:
                         state.row.append((key, 'Reduce', line.key))
+                        state.hrow[key] = ('Reduce', line)
         return state1
 
 if __name__ == '__main__':
