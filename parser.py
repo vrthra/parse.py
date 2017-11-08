@@ -324,23 +324,21 @@ class State:
         """
         >>> g = {}
         >>> g['$S'] = ['$E']
-        >>> g['$E'] = ['$T', '($E)']
-        >>> g['$T'] = ['1', '+$T', '$T+1']
+        >>> g['$E'] = ['$T + $E', '$T']
+        >>> g['$T'] = ['1']
         >>> pl = PLine.split_production_str('$E')
         >>> c = State.lr1_closure([PLine(key='$S', tokens=pl, cursor=0)], 0, g, '$S', {})
-
-        >> c[0]
-        PLine('$S', ['$E'], 0, '@')
-        >> c[1]
-        PLine('$E', ['$T'], 0, '@')
-        >> c[2]
-        PLine('$E', ['(', '$E', ')'], 0, '@')
-        >> c[3]
-        PLine('$T', ['1'], 0, '@')
-        >> c[4]
-        PLine('$T', ['+', '$T'], 0, '@')
-        >> c[5]
-        PLine('$T', ['$T', '+1'], 0, '@')
+        >>> c = [et(str(l)) for l in c]
+        >>> len(c)
+        4
+        >>> c[0]
+        '[p0]: $S -> $E  cursor: 0 @'
+        >>> c[1]
+        '[p0]: $E -> $T + $E  cursor: 0 @$'
+        >>> c[2]
+        '[p0]: $E -> $T  cursor: 0 @$'
+        >>> c[3]
+        '[p0]: $T -> 1  cursor: 0 @ $+'
         """
         # get non-terminals following start.cursor
         # a) Add the item itself to the closure
