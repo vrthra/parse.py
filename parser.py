@@ -81,6 +81,7 @@ def parse(input_text, grammar, registry):
                 # pop the same number of states.
                 state_stack = state_stack[:-pnum]
                 t = top_stack.transitions.get(pline.key)
+                assert t is not None
                 state_stack.append(t) # XXX null t here.
             else:
                 if next_token == '$' and state.accept():
