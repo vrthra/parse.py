@@ -69,10 +69,36 @@ def parse(input_text, grammar, registry):
     expr_stack = []
     state_stack = [registry[0]]
     tokens = list(input_text)
-    token_num = 0
     while tokens or len(expr_stack) > 1:
-       if not do_reduce(expr_stack, tokens[-1:] or []) and tokens:
-            next_token, *tokens = tokens
+        next_token, *tokens = tokens
+        # use the next_token on the state stack to decide what to do.
+        top_stack = state_stack[0]
+        nxt_state = top_stack.transitions.get(next_token)
+        if nxt_state:
+            # this means we can shift.
+            expr_stack.append(next_token)
+            state_stack.append(nxt_state)
+        else:
+            pline = top_stack.can_reduce(next_token)
+            if pline:
+                # pop the plines' rhs symbols off the stack
+                pnum = len(pline.tokens)
+                popped = expr_stack[-pnum:]
+                expr_stack = expr_stack[:-pnum]
+                # push the lhs symbol of pline
+                expr_stack.append(pline.key)
+                # pop the same number of states.
+                state_stack = state_stack[:-pnum]
+                t = top_stack.transitions.get(pline.key)
+                state_stack.append(t) # XXX null t here.
+            else:
+                if next_token == '$' and state.accept():
+                    print('parsed')
+                    return
+                else:
+                    raise Error
+
+        if not do_reduce(expr_stack, tokens[-1:] or []) and tokens:
             expr_stack.append(next_token) # shift
 
     assert len(expr_stack) == 1
@@ -288,8 +314,16 @@ def symbols(grammar):
 
 
 class PLine:
+    registry = {}
     def __init__(self, key, tokens, cursor, lookahead=set(), grammar=None):
         self.key,self.tokens,self.cursor,self.lookahead,self.grammar=key,tokens,cursor,lookahead,grammar
+
+    @classmethod
+    def register(cls, oid, obj):
+        cls.registry[obj] = oid
+
+    def production_number(self):
+        return registry[self]
 
     def __repr__(self):
         return 'PLine' + str((self.key, self.tokens, self.cursor, sorted(self.lookahead)))
@@ -366,6 +400,7 @@ class State:
         State.counter += 1
         State.registry[self.i] = self
 
+
     def __str__(self):
         return "State(%s): cursor:%s %s" % (self.i, self.cursor, ' '.join([str(i) for i in self.plines]))
 
@@ -395,10 +430,13 @@ class State:
         """
         # get non-terminals following start.cursor
         # a) Add the item itself to the closure
+        pline_counter = 0
         closure = [start]
         items = [start]
         seen = set()
         seen.add(start.key)
+        PLine.register(pline_counter, start)
+        pline_counter += 1
         # c) Repeat (b, c) for any new items added under (b).
         while items:
             item, *items = items
@@ -414,6 +452,8 @@ class State:
                     pl = PLine(key=token, tokens=tokens, cursor=0)
                     items.append(pl)
                     closure.append(pl)
+                    PLine.register(pline_counter, pl)
+                    pline_counter += 1
                     seen.add(pl.key)
         return closure
 
@@ -498,6 +538,21 @@ class State:
         s = State(new_plines, self.cursor + 1)
         self.transitions[token] = s
         return s
+
+    def accept(self):
+        for pline in self.plines:
+            if pline.at(pline.cursor) == Dollar():
+                return True
+        return False
+
+    def can_reduce(self, nxt_tok):
+        # is the cursor at the end in any of the plines?
+        for pline in self.plines:
+            if pline.cursor + 1 >= len(pline.tokens):
+                res = nxt_tok in pline.lookahead
+                if res: return pline
+        # return the production number too for this pline
+        return None
 
 
     @classmethod
