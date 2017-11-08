@@ -23,6 +23,7 @@ calc_grammar = [
 term_grammar = dict(calc_grammar)
 
 RE_NONTERMINAL = re.compile(r'(\$[a-zA-Z_]*)')
+def et(v): return v.replace("\t", " ").replace("\n", " ")
 
 def parse(input_text, grammar, registry):
     """
@@ -33,9 +34,11 @@ def parse(input_text, grammar, registry):
     >>> g['$T'] = ['$F$Tx']
     >>> g['$Tx'] = ['*$F$Tx', '']
     >>> g['$F'] = ['($E)', '11']
-    >>> State.construct_states(g, start='$S')
-    >>> text = "11"
-    >>> parse(text, g, State.registry)
+
+    TODO
+    >> State.construct_states(g, start='$S')
+    >> text = "11"
+    >> parse(text, g, State.registry)
     """
     expr_stack = []
     state_stack = [registry[0]]
@@ -246,7 +249,11 @@ class PLine:
         return self.pnum
 
     def __repr__(self):
-        return "[p%s]: %s -> %s\tcursor: %s %s" % (self.production_number(),
+        return "[p%s]: %s -> %s \tcursor: %s %s" % (self.production_number(),
+                self.key, ''.join([str(i) for i in self.tokens]), self.cursor, '@' + ''.join(sorted(self.lookahead)))
+
+    def __str__(self):
+        return "[p%s]: %s -> %s \tcursor: %s %s" % (self.production_number(),
                 self.key, ''.join([str(i) for i in self.tokens]), self.cursor, '@' + ''.join(sorted(self.lookahead)))
 
     def split_production_str(rule):
@@ -264,22 +271,25 @@ class PLine:
         creates a new pline with cursor incremented by one
         >>> g = {}
         >>> g['$S'] = ['$E']
-        >>> g['$E'] = ['$T', '($E)']
-        >>> g['$T'] = ['1', '+$T', '$T+1']
+        >>> g['$E'] = ['$T + $E', '$T']
+        >>> g['$T'] = ['1']
         >>> pl = PLine.split_production_str('$E')
-        >>> c = State.lr0_closure(PLine(key='$S', tokens=pl, cursor=0), 0, g)
-        >>> c[0]
-        PLine('$S', ['$E'], 0, '@')
-        >>> c[0].advance()
-        ('', None)
-
-        >>> c[2]
-        PLine('$E', ['(', '$E', ')'], 0, '@')
-        >>> c[2].advance()
-        ('(', PLine('$E', ['(', '$E', ')'], 1, '@'))
+        >>> c = State.create_lr0_closure(PLine(key='$S', tokens=pl, cursor=0), 0, g)
+        >>> et(str(c[0]))
+        '[p0]: $S -> $E  cursor: 0 @'
+        >>> et(str(c[0].advance()))
+        "('$E', [p0]: $S -> $E  cursor: 1 @)"
+        >>> et(str(c[1]))
+        '[p1]: $E -> $T + $E  cursor: 0 @'
+        >>> et(str(c[1].advance()))
+        "('$T', [p0]: $E -> $T + $E  cursor: 1 @)"
+        >>> et(str(c[2]))
+        '[p2]: $E -> $T  cursor: 0 @'
+        >>> et(str(c[2].advance()))
+        "('$T', [p0]: $E -> $T  cursor: 1 @)"
         """
 
-        if self.cursor + 1 >= len(self.tokens):
+        if self.cursor >= len(self.tokens):
             return '', None
         token = self.at(self.cursor)
         return token, PLine(self.key, self.tokens, self.cursor+1, self.lookahead, self.grammar, self.pnum)
@@ -305,31 +315,77 @@ class State:
 
 
     def __str__(self):
-        return "State(%s):\n%s" % (self.i, "\n".join([str(i) for i in self.plines]))
+        return "State(%s):\n\t%s" % (self.i, "\n".join([str(i) for i in self.plines]))
 
     def __repr__(self): return str(self)
 
     @staticmethod
-    def lr0_closure(start, cursor, grammar):
+    def lr1_closure(closure, cursor, grammar, start, fdict):
         """
         >>> g = {}
         >>> g['$S'] = ['$E']
         >>> g['$E'] = ['$T', '($E)']
         >>> g['$T'] = ['1', '+$T', '$T+1']
         >>> pl = PLine.split_production_str('$E')
-        >>> c = State.lr0_closure(PLine(key='$S', tokens=pl, cursor=0), 0, g)
-        >>> c[0]
+        >>> c = State.lr1_closure([PLine(key='$S', tokens=pl, cursor=0)], 0, g, '$S', {})
+
+        >> c[0]
         PLine('$S', ['$E'], 0, '@')
-        >>> c[1]
+        >> c[1]
         PLine('$E', ['$T'], 0, '@')
-        >>> c[2]
+        >> c[2]
         PLine('$E', ['(', '$E', ')'], 0, '@')
-        >>> c[3]
+        >> c[3]
         PLine('$T', ['1'], 0, '@')
-        >>> c[4]
+        >> c[4]
         PLine('$T', ['+', '$T'], 0, '@')
-        >>> c[5]
+        >> c[5]
         PLine('$T', ['$T', '+1'], 0, '@')
+        """
+        # get non-terminals following start.cursor
+        # a) Add the item itself to the closure
+        items = closure[:] # copy
+        seen = set()
+        for i in items: seen.add(i.key)
+        # c) Repeat (b, c) for any new items added under (b).
+        while items:
+            item, *items = items
+            # b) For any item in the closure, A :- α . β γ where the next symbol
+            # after the dot is a nonterminal, add the production rules of that
+            # symbol where the dot is before the first item
+            # (e.g., for each rule β :- γ, add items: β :- . γ
+            token = item.at(cursor)
+            if token in seen: continue
+            if is_nonterminal(token):
+                for ps in grammar[token]:
+                    tokens = PLine.split_production_str(ps)
+                    pl = PLine(key=token, tokens=tokens, cursor=0, lookahead=follow(token, grammar, start, fdict))
+                    items.append(pl)
+                    closure.append(pl)
+                    seen.add(pl.key)
+        return closure
+
+    @staticmethod
+    def create_lr0_closure(start, cursor, grammar):
+        """
+        >>> g = {}
+        >>> g['$S'] = ['$E']
+        >>> g['$E'] = ['$T + $E', '$T']
+        >>> g['$T'] = ['1']
+        >>> pl = PLine.split_production_str('$E')
+        >>> c = State.create_lr0_closure(PLine(key='$S', tokens=pl, cursor=0), 0, g)
+        >>> c = [et(str(i)) for i in c]
+        >>> len(c)
+        4
+        >>> c[0]
+        '[p0]: $S -> $E  cursor: 0 @'
+        >>> c[1]
+        '[p1]: $E -> $T + $E  cursor: 0 @'
+        >>> c[2]
+        '[p2]: $E -> $T  cursor: 0 @'
+        >>> c[3]
+        '[p3]: $T -> 1  cursor: 0 @'
+        >>> State.reset()
         """
         # get non-terminals following start.cursor
         # a) Add the item itself to the closure
@@ -370,19 +426,20 @@ class State:
         >>> g['$T'] = ['1', '+$T', '$T+1']
         >>> pl = PLine.split_production_str('$E')
         >>> fdict = {}
-        >>> c = State.to_lr1(State.lr0_closure(PLine(key='$S', tokens=pl, cursor=0), 0, g), '$S', g, fdict)
+        >>> c = State.to_lr1(State.create_lr0_closure(PLine(key='$S', tokens=pl, cursor=0), 0, g), '$S', g, fdict)
+        >>> c = [et(str(i)) for i in c]
         >>> c[0]
-        PLine('$S', ['$E'], 0, '@$')
+        '[p0]: $S -> $E  cursor: 0 @$'
         >>> c[1]
-        PLine('$E', ['$T'], 0, '@$)')
+        '[p1]: $E -> $T  cursor: 0 @$)'
         >>> c[2]
-        PLine('$E', ['(', '$E', ')'], 0, '@$)')
+        '[p2]: $E -> ($E)  cursor: 0 @$)'
         >>> c[3]
-        PLine('$T', ['1'], 0, '@$)+1')
+        '[p3]: $T -> 1  cursor: 0 @$)+1'
         >>> c[4]
-        PLine('$T', ['+', '$T'], 0, '@$)+1')
+        '[p4]: $T -> +$T  cursor: 0 @$)+1'
         >>> c[5]
-        PLine('$T', ['$T', '+1'], 0, '@$)+1')
+        '[p5]: $T -> $T+1  cursor: 0 @$)+1'
         """
         for item in lr0_items:
             item.lookahead = follow(item.key, grammar, start, fdict)
@@ -393,32 +450,31 @@ class State:
         """
         >>> g = {}
         >>> g['$S'] = ['$E']
-        >>> g['$E'] = ['$T', '($E)']
-        >>> g['$T'] = ['1', '+$T', '$T+1']
+        >>> g['$E'] = ['$T + $E', '$T']
+        >>> g['$T'] = ['1']
         >>> s = State.construct_initial_state(g, start='$S')
-        >>> s.plines[0]
-        PLine('$S', ['$E', .$], 0, '@$')
-        >>> s.plines[1]
-        PLine('$E', ['$T'], 0, '@$)')
-        >>> s.plines[2]
-        PLine('$E', ['(', '$E', ')'], 0, '@$)')
-        >>> s.plines[3]
-        PLine('$T', ['1'], 0, '@$)+1')
-        >>> s.plines[4]
-        PLine('$T', ['+', '$T'], 0, '@$)+1')
-        >>> s.plines[5]
-        PLine('$T', ['$T', '+1'], 0, '@$)+1')
+        >>> l = [et(str(l)) for l in s.plines]
+        >>> len(l)
+        4
+        >>> l[0]
+        '[p0]: $S -> $E.$  cursor: 0 @$'
+        >>> l[1]
+        '[p1]: $E -> $T + $E  cursor: 0 @$'
+        >>> l[2]
+        '[p2]: $E -> $T  cursor: 0 @$'
+        >>> l[3]
+        '[p3]: $T -> 1  cursor: 0 @ $+'
         >>> State.reset()
         """
         key = start
         production_str = grammar[key][0]
         tokens = PLine.split_production_str(production_str) + [Dollar()]
         cursor = 0
-        lr0_items = State.lr0_closure(start=PLine(key=key, tokens=tokens, cursor=cursor), cursor=0, grammar=grammar)
+        lr0_items = State.create_lr0_closure(start=PLine(key=key, tokens=tokens, cursor=cursor), cursor=0, grammar=grammar)
         fdict = {}
         lr1_items = State.to_lr1(lr0_items, start=start, grammar=grammar, fdict=fdict) # add the look ahead.
         return cls(lr1_items, cursor)
-    
+
     def go_to(self, token):
         if self.go_tos.get(token): return self.go_tos[token]
         new_plines = []
@@ -438,12 +494,13 @@ class State:
         >>> g['$E'] = ['$T', '($E)']
         >>> g['$T'] = ['1', '+$T', '$T+1']
         >>> s = State.construct_initial_state(g, start='$S')
-        >>> s.shift_to('$T')
-        State(1): cursor:1 PLine('$T', ['$T', '+1'], 1, '@$)+1')
-        >>> s.shift_to('$E')
-        State(2): cursor:1 PLine('$S', ['$E', .$], 1, '@$')
+        >>> et(str(s.shift_to('$T')))
+        'State(1):  [p0]: $E -> $T  cursor: 1 @$) [p0]: $T -> $T+1  cursor: 1 @$)+1'
+        >>> et(str(s.shift_to('$E')))
+        'State(2):  [p0]: $S -> $E.$  cursor: 1 @$'
         >>> State.reset()
         """
+        # each time we shift, we have to build a new closure.
         if self.shifts.get(token): return self.shifts[token]
         new_plines = []
         for pline in self.plines:
@@ -479,16 +536,20 @@ class State:
         >>> g['$E'] = ['$T', '$T + $E']
         >>> g['$T'] = ['1']
         >>> s = State.construct_states(g, '$S')
-        >>> len(s.shifts)
-        0
-        >>> len(s.go_tos)
-        2
-        >>> s.shift_to('$T')
-        State(4): cursor:1 PLine('$E', ['$T', ' + ', '$E'], 1, '@$')
-        >>> s.shift_to('$E')
-        State(5): cursor:1 PLine('$S', ['$E', .$], 1, '@$')
         >>> len(State.registry)
         6
+
+        >> len(s.shifts) # there should be two shifts
+        2
+        >> len(s.go_tos) # there should be 4 gotos
+        4
+
+        >>> et(str(s.shift_to('$T')))
+        'State(6):  [p0]: $E -> $T  cursor: 1 @$ [p0]: $E -> $T + $E  cursor: 1 @$'
+        >>> et(str(s.shift_to('$E')))
+        'State(7):  [p0]: $S -> $E.$  cursor: 1 @$'
+        >>> len(State.registry) # todo -- two of them -- state3, and state4 are dups
+        8
         >>> State.reset()
         """
         state1 = State.construct_initial_state(grammar, start)
