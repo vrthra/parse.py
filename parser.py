@@ -233,15 +233,17 @@ def symbols(grammar):
 
 class PLine:
     registry = {}
-    def __init__(self, key, tokens, cursor, lookahead=set(), grammar=None):
+    def __init__(self, key, tokens, cursor, lookahead=set(), grammar=None, pnum=0):
         self.key,self.tokens,self.cursor,self.lookahead,self.grammar=key,tokens,cursor,lookahead,grammar
+        self.pnum = 0
 
     @classmethod
     def register(cls, oid, obj):
         cls.registry[obj] = oid
+        obj.pnum = oid
 
     def production_number(self):
-        return PLine.registry[self]
+        return self.pnum
 
     def __repr__(self):
         return 'PLine[%s]: %s -> %s cursor: %s %s' % (self.production_number(),
@@ -280,7 +282,7 @@ class PLine:
         if self.cursor + 1 >= len(self.tokens):
             return '', None
         token = self.at(self.cursor)
-        return token, PLine(self.key, self.tokens, self.cursor+1, self.lookahead, self.grammar)
+        return token, PLine(self.key, self.tokens, self.cursor+1, self.lookahead, self.grammar, self.pnum)
 
     def at(self, cursor):
         return self.tokens[cursor]
@@ -514,7 +516,12 @@ def main(args):
     to_parse, = [f.read().strip() for f in using(open(args[1], 'r'))]
     grammar = my_grammar
     State.construct_states(grammar, start='$S')
-    parse(to_parse, grammar, State.registry)
+    log.debug("States:")
+    for skey in State.registry.keys():
+        s = State.registry[skey]
+        print(s)
+    log.debug('')
+    parse("11", grammar, State.registry)
 
 if __name__ == '__main__':
     main(sys.argv)
