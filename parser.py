@@ -22,9 +22,6 @@ calc_grammar = [
 
 term_grammar = dict(calc_grammar)
 
-def gkeys(grammar):
-    return [k for k,v in grammar]
-
 RE_NONTERMINAL = re.compile(r'(\$[a-zA-Z_]*)')
 
 
