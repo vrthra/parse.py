@@ -28,7 +28,7 @@ RE_NONTERMINAL = re.compile(r'(\$[a-zA-Z_]*)')
 class ParseResult:
     def __str__(self):
         if self.val == None: return self.key
-        return ''.join([str(i) for i in self.val])
+        return '(' + ''.join([str(i) for i in self.val]) + ')'
 
     def __repr__(self):
         if self.val == None: return self.key
@@ -93,7 +93,7 @@ def using(fn):
 
 def main(args):
     to_parse, = [f.read().strip() for f in using(open(args[1], 'r'))]
-    grammar = term_grammar
+    grammar, = args[2:] or [term_grammar]
     result = unify_key('$START', grammar, to_parse)
     print(result)
 
