@@ -246,7 +246,7 @@ class PLine:
         return self.pnum
 
     def __repr__(self):
-        return 'PLine[%s]: %s -> %s cursor: %s %s' % (self.production_number(),
+        return "[p%s]: %s -> %s\tcursor: %s %s" % (self.production_number(),
                 self.key, ''.join([str(i) for i in self.tokens]), self.cursor, '@' + ''.join(sorted(self.lookahead)))
 
     def split_production_str(rule):
@@ -288,7 +288,7 @@ class PLine:
         return self.tokens[cursor]
 
 class State:
-    counter = 0
+    counter = 1
     registry = {}
     @classmethod
     def reset(cls):
@@ -519,7 +519,7 @@ def main(args):
     log.debug("States:")
     for skey in State.registry.keys():
         s = State.registry[skey]
-        print(s)
+        log.debug(s)
     log.debug('')
     parse("11", grammar, State.registry)
 
