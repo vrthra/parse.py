@@ -553,6 +553,8 @@ my_grammar['$T'] = ['11']
 def main(args):
     to_parse, = [f.read().strip() for f in using(open(args[1], 'r'))]
     grammar = my_grammar
+    start = '$S'
+    grammar[start] = [grammar[start][0] + '$']
     initialize(grammar, start)
     parse("11", grammar, State.registry)
 

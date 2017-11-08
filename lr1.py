@@ -5,6 +5,7 @@ import re
 import collections
 import logging as log
 log.basicConfig( stream=sys.stdout, level=log.DEBUG )
+EOF = '\0'
 
 calc_grammar = [
     ("$START", ["$EXPR"]),
@@ -63,7 +64,7 @@ def first(tok, grammar):
             res |= set([''])
         else:
             # If there is a Production X -> Y1Y2..Yk then add first(Y1Y2..Yk) to first(X)
-            tokens = split_production_str(rule) #  Dollar() is being missed here.
+            tokens = split_production_str(rule) #  $ is being missed here.
             add_empty = True
             for t in tokens:
                 # First(Y1Y2..Yk) is either
@@ -118,7 +119,8 @@ def follow(grammar, start='$START', fdict={}):
 
     updates = []
 
-    fdict[start] |= {'$'}
+
+    fdict[start] |= {EOF}
     for key in sorted(grammar.keys()):
         for rule in grammar[key]:
             tokens = split_production_str(rule)
@@ -165,14 +167,14 @@ def is_nonterminal(val):
     True
     >>> is_nonterminal('+')
     False
-    >>> is_nonterminal(Dollar())
+    >>> is_nonterminal('$')
     False
     >>> is_nonterminal(Q())
     False
     """
-    if type(val) in [Dollar, Q]: return False
+    if type(val) in [Q]: return False
     if not val: return False
-    return val[0] == '$'
+    return len(val) > 1 and val[0] == '$'
 
 def is_terminal(val):
     """

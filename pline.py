@@ -111,6 +111,7 @@ class PLine:
 
         if self.cursor >= len(self.tokens):
             return '', None
+        if self.at(self.cursor) == EOF: return '', None
         token = self.at(self.cursor)
         return token, PLine.from_seed(self, self.cursor+1)
     def at(self, cursor):

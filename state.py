@@ -1,4 +1,5 @@
 from pline import *
+from lr1 import *
 class State:
     counter = 1
     registry = {}
@@ -68,7 +69,6 @@ class State:
         production_str = grammar[key][0]
 
         pl = PLine.get(key=key, production=production_str, cursor=0)
-        pl.tokens.append(Dollar())
 
         lr1_items = lr1_closure(closure=[pl], cursor=0, grammar=grammar)
         state =  cls(lr1_items, 0)
@@ -137,12 +137,6 @@ class State:
         s = State.get(plines=plines, sfrom=self)
         return s
 
-    def accept(self):
-        for pline in self.plines:
-            if pline.at(pline.cursor) == Dollar():
-                return True
-        return False
-
     def get_reduction(self, nxt_tok):
         # is the cursor at the end in any of the plines?
         for pline in self.plines:
@@ -184,55 +178,54 @@ class State:
         state1 = State.construct_initial_state(grammar, start)
         states = [state1]
         follow = {}
-        all_states = []
+        all_states = set()
         seen = set()
         while states:
             state, *states = states
-            all_states.append(state)
-            for key in sorted(symbols(grammar)): # needs terminal symbols too.
+            if state.i in seen: continue
+            seen.add(state.i)
+            all_states.add(state)
+            sym = symbols(grammar)
+            for key in sorted(sym): # needs terminal symbols too.
                 if is_terminal(key):
                     new_state = state.shift_to(key)
-                    if new_state and new_state.key not in seen:
+                    if new_state: # and new_state.i not in seen:
                         states.append(new_state)
-                        seen.add(new_state.key)
-                        state.row.append((key,'Shift', new_state.i))
                         state.hrow[key] = ('Shift', new_state.i)
                     else:
-                        state.row.append((key,'_', None))
                         state.hrow[key] = ('_', None)
                 else:
                     new_state = state.go_to(key)
-                    if new_state and new_state.key not in seen:
+                    if new_state: # and new_state.i not in seen:
                         states.append(new_state)
-                        seen.add(new_state.key)
-                        state.row.append((key,'Goto', new_state.i))
-                        state.hrow[key] = ('Goto', new_state)
+                        state.hrow[key] = ('Goto', new_state.i)
                     else:
-                        state.row.append((key,'_', None))
                         state.hrow[key] = ('_', None)
 
         for state in all_states:
-            # for each item, with an LR left of Dollar, add an accept.
+            # for each item, with an LR left of $, add an accept.
             # for each item, with an LR with dot at the end, add a reduce
             # r p
             for line in state.plines:
-                if line.at(line.cursor) == Dollar():
-                    key = '$'
-                    state.row.append((key, 'Accept', None))
+                if line.at(line.cursor) == EOF:
+                    key = EOF 
                     state.hrow[key] = ('Accept', None)
                 elif line.cursor + 1 > len(line.tokens):
                     for key in line.lookahead:
-                        state.row.append((key, 'Reduce', line.key))
                         state.hrow[key] = ('Reduce', line)
         return state1
 
 if __name__ == '__main__':
   State.reset()
   g = {}
-  g['$S'] = ['$E']
+  g['$S'] = ['$E' + EOF]
   g['$E'] = ['$T+$E', '$T']
   g['$T'] = ['1']
   s = State.construct_states(g, start='$S')
+  for i in PLine.cache.values():
+      if i.cursor == 0:
+          print(i.pnum, i)
+  print()
   for k,s in State.registry.items():
-      print(k, s.row)
+      print(k, "\t".join(["%s:%s" % (k,v) for k,v in s.hrow.items()]))
   State.reset()

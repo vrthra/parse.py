@@ -23,20 +23,23 @@ def parse(input_text, grammar, registry):
     >>> State.reset()
     """
     expr_stack = []
-    state_stack = [registry[1]]
+    state_stack = [registry[1].i]
     tokens = list(input_text)
     next_token = None
     while True:
         if not next_token:
-            next_token, *tokens = tokens
+            if not tokens:
+                next_token = EOF
+            else:
+                next_token, *tokens = tokens
         print("token: %s" % next_token)
         # use the next_token on the state stack to decide what to do.
-        (action, nxt) = state_stack[0].hrow[next_token]
+        (action, nxt) = State.registry[state_stack[-1]].hrow[next_token]
         if action == 'Shift':
-            next_state = nxt
+            next_state = State.registry[nxt]
             # this means we can shift.
             expr_stack.append(next_token)
-            state_stack.append(next_state)
+            state_stack.append(next_state.i)
             print("shift to (%d):\n%s" % (len(state_stack), next_state))
             next_token = None
         elif action == 'Reduce':
@@ -53,14 +56,16 @@ def parse(input_text, grammar, registry):
             # pop the same number of states.
             print("pop off:%d" % pnum)
             state_stack = state_stack[:-pnum]
-            (action, next_state) = state_stack[0].hrow[pline.key] # TODO: next_staet shoudl be thehead of pline
+            (action, nxt) = State.registry[state_stack[-1]].hrow[pline.key] # TODO: next_staet shoudl be thehead of pline
             print("action:%s" % action)
-            state_stack.append(next_state)
+            next_state = State.registry[nxt]
+            state_stack.append(next_state.i)
             print("go to (%d):\n%s" % (len(state_stack), next_state))
         elif action == 'Goto':
-            print("Xaction:%s" % action)
+            print("action:%s" % action)
         elif action == 'Accept':
-            print("Yaction:%s" % action)
+            print("action:%s" % action)
+            break
 
     assert len(expr_stack) == 1
     return expr_stack[0]
@@ -68,6 +73,7 @@ def parse(input_text, grammar, registry):
 
 
 def initialize(grammar, start):
+    grammar[start] = [grammar[start][0] + EOF]
     State.construct_states(grammar, start='$S')
     # log.debug("States:")
     # for skey in State.registry.keys():
@@ -80,7 +86,7 @@ def using(fn):
 
 my_grammar = {}
 my_grammar['$S'] = ['$E']
-my_grammar['$E']  = ['$T + $E', '$T']
+my_grammar['$E']  = ['$T+$E', '$T']
 my_grammar['$T'] = ['1']
 
 def main(args):
