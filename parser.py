@@ -208,6 +208,7 @@ def is_nonterminal(val):
     False
     """
     if type(val) in [Dollar, Q]: return False
+    if not val: return False
     return val[0] == '$'
 
 def is_terminal(val):
