@@ -56,15 +56,6 @@ def match(rule, stack, lookahead):
 
 
 
-def do_reduce(expr_stack, lookahead):
-    if not expr_stack: return False
-    for k,rules in term_grammar.items():
-        for rule in rules:
-           m = match(rule, expr_stack, lookahead)
-           if m: # v should be more than key
-               expr_stack.append(k) # should push (k, m.matched)
-               return True
-
 def parse(input_text, grammar, registry):
     expr_stack = []
     state_stack = [registry[0]]
@@ -93,13 +84,9 @@ def parse(input_text, grammar, registry):
                 state_stack.append(t) # XXX null t here.
             else:
                 if next_token == '$' and state.accept():
-                    print('parsed')
-                    return
+                    break
                 else:
                     raise Error
-
-        if not do_reduce(expr_stack, tokens[-1:] or []) and tokens:
-            expr_stack.append(next_token) # shift
 
     assert len(expr_stack) == 1
     return expr_stack[0]
@@ -291,9 +278,9 @@ def get_productions(nonterminal, cursor, lookahead, grammar):
     Get the next level of productions from the rules of this non terminal.
     >>> grammar = term_grammar
     >>> get_productions('$START', 0, '$', grammar)
-    [PLine('$START', ['$EXPR'], 0, ['$'])]
+    [PLine('$START', ['$EXPR'], 0, '@$')]
     >>> get_productions('$EXPR', 0, '$', grammar)
-    [PLine('$EXPR', ['$EXPR', ' + ', '$TERM'], 0, ['$']), PLine('$EXPR', ['$EXPR', ' - ', '$TERM'], 0, ['$']), PLine('$EXPR', ['$TERM'], 0, ['$'])]
+    [PLine('$EXPR', ['$EXPR', ' + ', '$TERM'], 0, '@$'), PLine('$EXPR', ['$EXPR', ' - ', '$TERM'], 0, '@$'), PLine('$EXPR', ['$TERM'], 0, '@$')]
     """
     prod_strs = grammar[nonterminal]
     plines = []
@@ -326,7 +313,7 @@ class PLine:
         return registry[self]
 
     def __repr__(self):
-        return 'PLine' + str((self.key, self.tokens, self.cursor, sorted(self.lookahead)))
+        return 'PLine' + str((self.key, self.tokens, self.cursor, '@' + ''.join(sorted(self.lookahead))))
 
     def split_production_str(rule):
         """
@@ -348,14 +335,14 @@ class PLine:
         >>> pl = PLine.split_production_str('$E')
         >>> c = State.lr0_closure(PLine(key='$S', tokens=pl, cursor=0), 0, g)
         >>> c[0]
-        PLine('$S', ['$E'], 0, [])
+        PLine('$S', ['$E'], 0, '@')
         >>> c[0].advance()
         ('', None)
 
         >>> c[2]
-        PLine('$E', ['(', '$E', ')'], 0, [])
+        PLine('$E', ['(', '$E', ')'], 0, '@')
         >>> c[2].advance()
-        ('(', PLine('$E', ['(', '$E', ')'], 1, []))
+        ('(', PLine('$E', ['(', '$E', ')'], 1, '@'))
         """
 
         if self.cursor + 1 >= len(self.tokens):
@@ -416,17 +403,17 @@ class State:
         >>> pl = PLine.split_production_str('$E')
         >>> c = State.lr0_closure(PLine(key='$S', tokens=pl, cursor=0), 0, g)
         >>> c[0]
-        PLine('$S', ['$E'], 0, [])
+        PLine('$S', ['$E'], 0, '@')
         >>> c[1]
-        PLine('$E', ['$T'], 0, [])
+        PLine('$E', ['$T'], 0, '@')
         >>> c[2]
-        PLine('$E', ['(', '$E', ')'], 0, [])
+        PLine('$E', ['(', '$E', ')'], 0, '@')
         >>> c[3]
-        PLine('$T', ['1'], 0, [])
+        PLine('$T', ['1'], 0, '@')
         >>> c[4]
-        PLine('$T', ['+', '$T'], 0, [])
+        PLine('$T', ['+', '$T'], 0, '@')
         >>> c[5]
-        PLine('$T', ['$T', '+1'], 0, [])
+        PLine('$T', ['$T', '+1'], 0, '@')
         """
         # get non-terminals following start.cursor
         # a) Add the item itself to the closure
@@ -469,17 +456,17 @@ class State:
         >>> fdict = {}
         >>> c = State.to_lr1(State.lr0_closure(PLine(key='$S', tokens=pl, cursor=0), 0, g), '$S', g, fdict)
         >>> c[0]
-        PLine('$S', ['$E'], 0, ['$'])
+        PLine('$S', ['$E'], 0, '@$')
         >>> c[1]
-        PLine('$E', ['$T'], 0, ['$', ')'])
+        PLine('$E', ['$T'], 0, '@$)')
         >>> c[2]
-        PLine('$E', ['(', '$E', ')'], 0, ['$', ')'])
+        PLine('$E', ['(', '$E', ')'], 0, '@$)')
         >>> c[3]
-        PLine('$T', ['1'], 0, ['$', ')', '+', '1'])
+        PLine('$T', ['1'], 0, '@$)+1')
         >>> c[4]
-        PLine('$T', ['+', '$T'], 0, ['$', ')', '+', '1'])
+        PLine('$T', ['+', '$T'], 0, '@$)+1')
         >>> c[5]
-        PLine('$T', ['$T', '+1'], 0, ['$', ')', '+', '1'])
+        PLine('$T', ['$T', '+1'], 0, '@$)+1')
         """
         for item in lr0_items:
             item.lookahead = follow(item.key, grammar, start, fdict)
@@ -494,17 +481,17 @@ class State:
         >>> g['$T'] = ['1', '+$T', '$T+1']
         >>> s = State.construct_initial_state(g, start='$S')
         >>> s.plines[0]
-        PLine('$S', ['$E', .$], 0, ['$'])
+        PLine('$S', ['$E', .$], 0, '@$')
         >>> s.plines[1]
-        PLine('$E', ['$T'], 0, ['$', ')'])
+        PLine('$E', ['$T'], 0, '@$)')
         >>> s.plines[2]
-        PLine('$E', ['(', '$E', ')'], 0, ['$', ')'])
+        PLine('$E', ['(', '$E', ')'], 0, '@$)')
         >>> s.plines[3]
-        PLine('$T', ['1'], 0, ['$', ')', '+', '1'])
+        PLine('$T', ['1'], 0, '@$)+1')
         >>> s.plines[4]
-        PLine('$T', ['+', '$T'], 0, ['$', ')', '+', '1'])
+        PLine('$T', ['+', '$T'], 0, '@$)+1')
         >>> s.plines[5]
-        PLine('$T', ['$T', '+1'], 0, ['$', ')', '+', '1'])
+        PLine('$T', ['$T', '+1'], 0, '@$)+1')
         >>> State.reset()
         """
         key = start
@@ -524,9 +511,9 @@ class State:
         >>> g['$T'] = ['1', '+$T', '$T+1']
         >>> s = State.construct_initial_state(g, start='$S')
         >>> s.transition('$T')
-        State(1): cursor:1 PLine('$T', ['$T', '+1'], 1, ['$', ')', '+', '1'])
+        State(1): cursor:1 PLine('$T', ['$T', '+1'], 1, '@$)+1')
         >>> s.transition('$E')
-        State(2): cursor:1 PLine('$S', ['$E', .$], 1, ['$'])
+        State(2): cursor:1 PLine('$S', ['$E', .$], 1, '@$')
         >>> State.reset()
         """
         new_plines = []
@@ -566,11 +553,11 @@ class State:
         >>> len(s.transitions)
         2
         >>> s.transitions['$T']
-        State(2): cursor:1 PLine('$E', ['$T', ' + ', '$E'], 1, ['$'])
+        State(2): cursor:1 PLine('$E', ['$T', ' + ', '$E'], 1, '@$')
         >>> s.transitions['$E']
-        State(1): cursor:1 PLine('$S', ['$E', .$], 1, ['$'])
+        State(1): cursor:1 PLine('$S', ['$E', .$], 1, '@$')
         >>> len(State.registry)
-        3
+        4
         >>> State.reset()
         """
         state1 = State.construct_initial_state(grammar, start)
@@ -590,7 +577,6 @@ def main(args):
     to_parse, = [f.read().strip() for f in using(open(args[1], 'r'))]
     grammar = term_grammar
     State.construct_states(grammar)
-    print(State.registry[0].transitions)
     parse(to_parse, grammar, State.registry)
 
 if __name__ == '__main__':
