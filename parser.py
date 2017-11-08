@@ -28,33 +28,6 @@ def gkeys(grammar):
 RE_NONTERMINAL = re.compile(r'(\$[a-zA-Z_]*)')
 
 
-def match_literal(rule, stack):
-    # get len of rule
-    rulelen = len(rule)
-    # get that may out of the stack.
-    if len(stack) < rulelen: return ()
-    vstack = stack[-rulelen:]
-    for a,b in zip(vstack, rule):
-       if a != b: return ()
-    del stack[-rulelen:]
-    return vstack
-
-
-
-
-def match(rule, stack, lookahead):
-    if '$' not in rule: return match_literal(rule, stack)
-    vals = re.findall(RE_NONTERMINAL, rule)
-    vlen = len(vals)
-    if vlen > len(stack): return ()
-    vstack = (stack+ lookahead)[-vlen:]
-
-    for a,b in zip(vstack, vals):
-        if a != b: return ()
-    del stack[-vlen:]
-    return vstack
-
-
 
 def parse(input_text, grammar, registry):
     expr_stack = []
@@ -64,12 +37,12 @@ def parse(input_text, grammar, registry):
         next_token, *tokens = tokens
         # use the next_token on the state stack to decide what to do.
         top_stack = state_stack[0]
-        nxt_state = top_stack.transitions.get(next_token)
+        nxt_state = top_stack.shift_to(next_token)
         if nxt_state:
             # this means we can shift.
             expr_stack.append(next_token)
             state_stack.append(nxt_state)
-        else:
+        else: # TODO go_tos
             pline = top_stack.can_reduce(next_token)
             if pline:
                 # pop the plines' rhs symbols off the stack
@@ -80,7 +53,7 @@ def parse(input_text, grammar, registry):
                 expr_stack.append(pline.key)
                 # pop the same number of states.
                 state_stack = state_stack[:-pnum]
-                t = top_stack.transitions.get(pline.key)
+                t = top_stack.go_to(pline.key)
                 assert t is not None
                 state_stack.append(t) # XXX null t here.
             else:
@@ -91,16 +64,6 @@ def parse(input_text, grammar, registry):
 
     assert len(expr_stack) == 1
     return expr_stack[0]
-
-def is_nullable(tok, grammar):
-    if is_terminal(tok): return False
-    rules = grammar[tok]
-    for rule in rules:
-        if not rule: return True
-        else:
-           t, *tok = PLine.split_production_str(rule)
-           if is_nullable(t, grammar): return True
-    return False
 
 def first(tok, grammar):
     """
@@ -219,31 +182,6 @@ def follow(tok, grammar, start='$START', fdict={}):
                fdict[k] |= val
     return fdict[tok]
 
-
-
-# p0, p1, p2, ..
-def construct_production_table(grammar):
-    productions = []
-    i = 0
-    for key, rules in gkeys(grammar):
-        for rule in rules:
-           vals = re.findall(RE_NONTERMINAL, rule)
-           productions.append(('p%d' % i,  (key, vals)))
-           i += 1
-    return productions
-
-def get_next_dfa_state(state, keys):
-    for key in keys:
-        for (k, r, cursor) in state:
-            # check if the key is what is at the cursor in the rules.
-            if r[cursor] == key:
-                yield (k, r, cursor+1)
-        # advance by one
-
-def get_next_dfa_states(dfa_states, keys):
-    for state in dfa_states:
-        yield from get_next_dfa_state(state, keys)
-
 class Token: pass
 class Dollar(Token):
     def __str__(self): return '.$'
@@ -265,6 +203,7 @@ def is_nonterminal(val):
     """
     if type(val) in [Dollar, Q]: return False
     return val[0] == '$'
+
 def is_terminal(val):
     """
     >>> is_terminal('$START')
@@ -273,23 +212,6 @@ def is_terminal(val):
     True
     """
     return not is_nonterminal(val)
-
-def get_productions(nonterminal, cursor, lookahead, grammar):
-    """
-    Get the next level of productions from the rules of this non terminal.
-    >>> grammar = term_grammar
-    >>> get_productions('$START', 0, '$', grammar)
-    [PLine('$START', ['$EXPR'], 0, '@$')]
-    >>> get_productions('$EXPR', 0, '$', grammar)
-    [PLine('$EXPR', ['$EXPR', ' + ', '$TERM'], 0, '@$'), PLine('$EXPR', ['$EXPR', ' - ', '$TERM'], 0, '@$'), PLine('$EXPR', ['$TERM'], 0, '@$')]
-    """
-    prod_strs = grammar[nonterminal]
-    plines = []
-    for pstr in prod_strs:
-        tokens = PLine.split_production_str(pstr)
-        pl = PLine(nonterminal, tokens, cursor, lookahead, grammar)
-        plines.append(pl)
-    return plines
 
 def symbols(grammar):
     all_symbols = set()
@@ -354,25 +276,6 @@ class PLine:
     def at(self, cursor):
         return self.tokens[cursor]
 
-    def get_terminals(self, cursor):
-        tok = self.at(cursor)
-        log.debug(tok)
-        if is_terminal(tok):
-            return set([tok])
-        else:
-            return set(self._get_terminal(tok))
-
-    def _get_terminal(self, tok):
-        terminals = []
-        for rule in self.grammar[tok]:
-            t,*_rest = PLine.split_production_str(rule)
-            if is_terminal(t):
-                terminals.append(t)
-            else:
-                terminals += self._get_terminal(t)
-        return terminals
-
-
 class State:
     counter = 0
     registry = {}
@@ -383,7 +286,8 @@ class State:
 
     def __init__(self, plines, cursor):
         self.plines, self.cursor = plines, cursor
-        self.transitions = {}
+        self.shifts = {}
+        self.go_tos = {}
         self.i = State.counter
         State.counter += 1
         State.registry[self.i] = self
@@ -503,20 +407,9 @@ class State:
         fdict = {}
         lr1_items = State.to_lr1(lr0_items, start=start, grammar=grammar, fdict=fdict) # add the look ahead.
         return cls(lr1_items, cursor)
-
-    def transition(self, token):
-        """
-        >>> g = {}
-        >>> g['$S'] = ['$E']
-        >>> g['$E'] = ['$T', '($E)']
-        >>> g['$T'] = ['1', '+$T', '$T+1']
-        >>> s = State.construct_initial_state(g, start='$S')
-        >>> s.transition('$T')
-        State(1): cursor:1 PLine('$T', ['$T', '+1'], 1, '@$)+1')
-        >>> s.transition('$E')
-        State(2): cursor:1 PLine('$S', ['$E', .$], 1, '@$')
-        >>> State.reset()
-        """
+    
+    def go_to(self, token):
+        if self.go_tos.get(token): return self.go_tos[token]
         new_plines = []
         for pline in self.plines:
             tadv, new_pline = pline.advance()
@@ -524,7 +417,31 @@ class State:
                 new_plines.append(new_pline)
         if not new_plines: return None
         s = State(new_plines, self.cursor + 1)
-        self.transitions[token] = s
+        self.go_tos[token] = s
+        return s
+
+    def shift_to(self, token):
+        """
+        >>> g = {}
+        >>> g['$S'] = ['$E']
+        >>> g['$E'] = ['$T', '($E)']
+        >>> g['$T'] = ['1', '+$T', '$T+1']
+        >>> s = State.construct_initial_state(g, start='$S')
+        >>> s.shift_to('$T')
+        State(1): cursor:1 PLine('$T', ['$T', '+1'], 1, '@$)+1')
+        >>> s.shift_to('$E')
+        State(2): cursor:1 PLine('$S', ['$E', .$], 1, '@$')
+        >>> State.reset()
+        """
+        if self.shifts.get(token): return self.shifts[token]
+        new_plines = []
+        for pline in self.plines:
+            tadv, new_pline = pline.advance()
+            if token == tadv:
+                new_plines.append(new_pline)
+        if not new_plines: return None
+        s = State(new_plines, self.cursor + 1)
+        self.shifts[token] = s
         return s
 
     def accept(self):
@@ -551,14 +468,16 @@ class State:
         >>> g['$E'] = ['$T', '$T + $E']
         >>> g['$T'] = ['1']
         >>> s = State.construct_states(g, '$S')
-        >>> len(s.transitions)
+        >>> len(s.shifts)
+        0
+        >>> len(s.go_tos)
         2
-        >>> s.transitions['$T']
-        State(2): cursor:1 PLine('$E', ['$T', ' + ', '$E'], 1, '@$')
-        >>> s.transitions['$E']
-        State(1): cursor:1 PLine('$S', ['$E', .$], 1, '@$')
+        >>> s.shift_to('$T')
+        State(4): cursor:1 PLine('$E', ['$T', ' + ', '$E'], 1, '@$')
+        >>> s.shift_to('$E')
+        State(5): cursor:1 PLine('$S', ['$E', .$], 1, '@$')
         >>> len(State.registry)
-        4
+        6
         >>> State.reset()
         """
         state1 = State.construct_initial_state(grammar, start)
@@ -566,9 +485,12 @@ class State:
         while states:
             state, *states = states
             for key in sorted(symbols(grammar)): # needs terminal symbols too.
-                new_state = state.transition(key)
-                if new_state:
-                    states.append(new_state)
+                if is_terminal(key):
+                    new_state = state.shift_to(key)
+                    if new_state: states.append(new_state)
+                else:
+                    new_state = state.go_to(key)
+                    if new_state: states.append(new_state)
         return state1
 
 def using(fn):
