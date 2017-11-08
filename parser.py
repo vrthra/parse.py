@@ -2,6 +2,7 @@
 import sys
 import re
 import collections
+import json
 
 term_grammar = {
     "$START":
@@ -93,7 +94,11 @@ def using(fn):
 
 def main(args):
     to_parse, = [f.read().strip() for f in using(open(args[1], 'r'))]
-    grammar, = args[2:] or [term_grammar]
+
+    grammar = term_grammar
+    if len(args) > 2:
+        grammarstr, = [f.read().strip() for f in using(open(args[2], 'r'))]
+        grammar = json.loads(grammarstr)
     result = unify_key('$START', grammar, to_parse)
     print(result)
 
