@@ -27,12 +27,13 @@ RE_NONTERMINAL = re.compile(r'(\$[a-zA-Z_]*)')
 def parse(input_text, grammar, registry):
     """
     >>> g = {}
+    >>> g['$S']  = ['$E']
     >>> g['$E']  = ['$T$Ex']
     >>> g['$Ex'] = ['+$T$Ex','']
     >>> g['$T'] = ['$F$Tx']
     >>> g['$Tx'] = ['*$F$Tx', '']
     >>> g['$F'] = ['($E)', '11']
-    >>> State.construct_states(g, start='$E')
+    >>> State.construct_states(g, start='$S')
     >>> text = "11"
     >>> parse(text, g, State.registry)
     """
@@ -240,10 +241,11 @@ class PLine:
         cls.registry[obj] = oid
 
     def production_number(self):
-        return registry[self]
+        return PLine.registry[self]
 
     def __repr__(self):
-        return 'PLine: %s -> %s cursor: %s %s' % (self.key, ''.join(self.tokens), self.cursor, '@' + ''.join(sorted(self.lookahead)))
+        return 'PLine[%s]: %s -> %s cursor: %s %s' % (self.production_number(),
+                self.key, ''.join([str(i) for i in self.tokens]), self.cursor, '@' + ''.join(sorted(self.lookahead)))
 
     def split_production_str(rule):
         """
@@ -301,7 +303,7 @@ class State:
 
 
     def __str__(self):
-        return "State(%s): cursor:%s %s" % (self.i, self.cursor, ' '.join([str(i) for i in self.plines]))
+        return "State(%s):\n%s" % (self.i, "\n".join([str(i) for i in self.plines]))
 
     def __repr__(self): return str(self)
 
@@ -504,16 +506,14 @@ def using(fn):
     with fn as f: yield f
 
 my_grammar = {}
-my_grammar['$E']  = ['$T$Ex']
-my_grammar['$Ex'] = ['+$T$Ex','']
-my_grammar['$T'] = ['$F$Tx']
-my_grammar['$Tx'] = ['*$F$Tx', '']
-my_grammar['$F'] = ['($E)', '11']
+my_grammar['$S'] = ['$E']
+my_grammar['$E']  = ['$T + $E', '$T']
+my_grammar['$T'] = ['11']
 
 def main(args):
     to_parse, = [f.read().strip() for f in using(open(args[1], 'r'))]
     grammar = my_grammar
-    State.construct_states(grammar, start='$E')
+    State.construct_states(grammar, start='$S')
     parse(to_parse, grammar, State.registry)
 
 if __name__ == '__main__':
