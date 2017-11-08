@@ -24,9 +24,18 @@ term_grammar = dict(calc_grammar)
 
 RE_NONTERMINAL = re.compile(r'(\$[a-zA-Z_]*)')
 
-
-
 def parse(input_text, grammar, registry):
+    """
+    >>> g = {}
+    >>> g['$E']  = ['$T$Ex']
+    >>> g['$Ex'] = ['+$T$Ex','']
+    >>> g['$T'] = ['$F$Tx']
+    >>> g['$Tx'] = ['*$F$Tx', '']
+    >>> g['$F'] = ['($E)', '11']
+    >>> State.construct_states(g, start='$E')
+    >>> text = "11"
+    >>> parse(text, g, State.registry)
+    """
     expr_stack = []
     state_stack = [registry[0]]
     tokens = list(input_text)
@@ -57,7 +66,7 @@ def parse(input_text, grammar, registry):
                 if next_token == '$' and state.accept():
                     break
                 else:
-                    raise Error
+                    raise Exception("Can not accept %s" % next_token)
 
     assert len(expr_stack) == 1
     return expr_stack[0]
@@ -233,7 +242,7 @@ class PLine:
         return registry[self]
 
     def __repr__(self):
-        return 'PLine' + str((self.key, self.tokens, self.cursor, '@' + ''.join(sorted(self.lookahead))))
+        return 'PLine: %s -> %s cursor: %s %s' % (self.key, ''.join(self.tokens), self.cursor, '@' + ''.join(sorted(self.lookahead)))
 
     def split_production_str(rule):
         """
@@ -493,10 +502,17 @@ class State:
 def using(fn):
     with fn as f: yield f
 
+my_grammar = {}
+my_grammar['$E']  = ['$T$Ex']
+my_grammar['$Ex'] = ['+$T$Ex','']
+my_grammar['$T'] = ['$F$Tx']
+my_grammar['$Tx'] = ['*$F$Tx', '']
+my_grammar['$F'] = ['($E)', '11']
+
 def main(args):
     to_parse, = [f.read().strip() for f in using(open(args[1], 'r'))]
-    grammar = term_grammar
-    State.construct_states(grammar)
+    grammar = my_grammar
+    State.construct_states(grammar, start='$E')
     parse(to_parse, grammar, State.registry)
 
 if __name__ == '__main__':
