@@ -62,10 +62,14 @@ def parse(input_text, grammar, registry):
             state_stack.append(next_state.i)
             print("go to (%d):\n%s" % (len(state_stack), next_state))
         elif action == 'Goto':
+            next_state = State.registry[nxt]
+            state_stack.append(next_state.i)
             print("action:%s" % action)
         elif action == 'Accept':
             print("action:%s" % action)
             break
+        else:
+            raise Exception("Syntax error")
 
     assert len(expr_stack) == 1
     return expr_stack[0]
@@ -74,7 +78,7 @@ def parse(input_text, grammar, registry):
 
 def initialize(grammar, start):
     grammar[start] = [grammar[start][0] + EOF]
-    State.construct_states(grammar, start='$S')
+    State.construct_states(grammar, start)
     # log.debug("States:")
     # for skey in State.registry.keys():
     #    s = State.registry[skey]
@@ -85,15 +89,22 @@ def using(fn):
     with fn as f: yield f
 
 my_grammar = {}
-my_grammar['$S'] = ['$E']
+my_grammar['$START'] = ['$E']
 my_grammar['$E']  = ['$T+$E', '$T']
 my_grammar['$T'] = ['1']
 
 def main(args):
     to_parse, = [f.read().strip() for f in using(open(args[1], 'r'))]
-    grammar = my_grammar
-    initialize(grammar, '$S')
-    parse("1+1", grammar, State.registry)
+    grammar = term_grammar
+    initialize(grammar, '$START')
+
+    for i in PLine.cache.values():
+       if i.cursor == 0:
+           print(i.pnum, i)
+    print()
+    for k,s in State.registry.items():
+       print(k, "\t".join(["%s:%s" % (k,v) for k,v in s.hrow.items()]))
+    parse(to_parse, grammar, State.registry)
 
 if __name__ == '__main__':
     main(sys.argv)

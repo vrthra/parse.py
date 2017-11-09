@@ -10,15 +10,23 @@ EOF = '\0'
 calc_grammar = [
     ("$START", ["$EXPR"]),
 
-    ("$EXPR", ["$EXPR + $TERM", "$EXPR - $TERM", "$TERM"]),
+    ("$EXPR", ["$EXPR+$TERM", "$EXPR-$TERM", "$TERM"]),
 
-    ("$TERM", ["$TERM * $FACTOR", "$TERM / $FACTOR", "$FACTOR"]),
+    ("$TERM", ["$TERM*$FACTOR", "$TERM/$FACTOR", "$FACTOR"]),
 
     ("$FACTOR", ["+$FACTOR", "-$FACTOR", "($EXPR)", "$INTEGER", "$INTEGER.$INTEGER"]),
 
     ("$INTEGER", ["$INTEGER$DIGIT", "$DIGIT"]),
 
     ("$DIGIT", ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"])
+]
+
+calc_grammar = [
+    ("$START", ["$INTEGER"]),
+
+    ("$INTEGER", ["$INTEGER$DIGIT", "$DIGIT"]),
+
+    ("$DIGIT", ["1"])
 ]
 
 term_grammar = dict(calc_grammar)
