@@ -56,7 +56,7 @@ def parse(input_text, grammar, registry):
             # pop the same number of states.
             print("pop off:%d" % pnum)
             state_stack = state_stack[:-pnum]
-            (action, nxt) = State.registry[state_stack[-1]].hrow[pline.key] # TODO: next_staet shoudl be thehead of pline
+            (action, nxt) = State.registry[state_stack[-1]].hrow[pline.key]
             print("action:%s" % action)
             next_state = State.registry[nxt]
             state_stack.append(next_state.i)
@@ -79,23 +79,30 @@ def parse(input_text, grammar, registry):
 def initialize(grammar, start):
     grammar[start] = [grammar[start][0] + EOF]
     State.construct_states(grammar, start)
-    # log.debug("States:")
-    # for skey in State.registry.keys():
-    #    s = State.registry[skey]
-    #    log.debug(s)
-    # log.debug('')
+    log.debug("States:")
+    for skey in State.registry.keys():
+        s = State.registry[skey]
+        log.debug(s)
+    log.debug('')
 
 def using(fn):
     with fn as f: yield f
 
+# my_grammar = {}
+# my_grammar['$START'] = ['$I']
+# my_grammar['$I']  = ['$I$D', '$D']
+# my_grammar['$D'] = ['1']
+
 my_grammar = {}
 my_grammar['$START'] = ['$E']
 my_grammar['$E']  = ['$T+$E', '$T']
-my_grammar['$T'] = ['1']
+my_grammar['$T'] = ['$I']
+my_grammar['$I'] = ['$I$D', '$D']
+my_grammar['$D'] = ['1','2','3','4','5','6','7','8','9','0']
 
 def main(args):
     to_parse, = [f.read().strip() for f in using(open(args[1], 'r'))]
-    grammar = term_grammar
+    grammar = my_grammar
     initialize(grammar, '$START')
 
     for i in PLine.cache.values():
