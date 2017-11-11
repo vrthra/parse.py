@@ -56,6 +56,15 @@ class PEGParser:
 def using(fn):
     with fn as f: yield f
 
+def stripit(val):
+    def strip_v(val): return [strip_k(i) for i in val]
+
+    def strip_k(val):
+        k, (t, v) = val
+        return {k: strip_v(v)} if v else k
+
+    return strip_k(val)
+
 def main(args):
     to_parse, = [f.read().strip() for f in using(open(args[1], 'r'))]
 
@@ -64,7 +73,7 @@ def main(args):
         grammarstr, = [f.read().strip() for f in using(open(args[2], 'r'))]
         grammar = json.loads(grammarstr)
     result = PEGParser(grammar).unify_key('$START', to_parse)
-    print(result)
+    print(stripit(result))
 
 if __name__ == '__main__':
     main(sys.argv)
