@@ -56,7 +56,7 @@ def main(args):
     def readall(fn): return ''.join([f for f in open(fn, 'r')]).strip()
 
     to_parse = readall(args[1])
-    grammar = json.loads(readall(args[2]) if len(args) > 2 else term_grammar)
+    grammar = json.loads(readall(args[2])) if len(args) > 2 else term_grammar
     result = PEGParser(grammar).unify_key('$START', to_parse)
     print(result[1])
 
