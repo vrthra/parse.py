@@ -77,12 +77,9 @@ class PEGParser:
     @functools.lru_cache(maxsize=None)
     def unify_key(self, key, text, tfrom=0):
         rules = self.grammar[key]
-        # PEG -- try by order.
-        for rule in rules:
-            ret = self.unify_line(rule, text, tfrom)
-            if not ret.val: continue # PEG
-            return KeyMatch(key, tfrom, ret.till, ret.val)
-        return NoParse()
+        rets = (self.unify_line(rule, text, tfrom) for rule in rules)
+        ret = next((ret for ret in rets if ret.val), None)
+        return KeyMatch(key, tfrom, ret.till, ret.val) if ret else NoParse()
 
 def using(fn):
     with fn as f: yield f
