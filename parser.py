@@ -57,13 +57,8 @@ def using(fn):
     with fn as f: yield f
 
 def stripit(val):
-    def strip_v(val): return [strip_k(i) for i in val]
-
-    def strip_k(val):
-        k, (t, v) = val
-        return {k: strip_v(v)} if v else k
-
-    return strip_k(val)
+    k, (t, v) = val
+    return {k: [stripit(i) for i in v]} if v else k
 
 def main(args):
     to_parse, = [f.read().strip() for f in using(open(args[1], 'r'))]
