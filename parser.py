@@ -56,22 +56,23 @@ def is_symbol(x): return x[0] == '$'
 class PEGParser:
     def __init__(self, grammar): self.grammar = grammar
 
+    def literal_match(self, part, text, tfrom):
+        if not text[tfrom:].startswith(part): return None
+        return KeyMatch(part, tfrom, tfrom + len(part), None)
+
+    def symbol_match(self, part, text, tfrom):
+        res = self.unify_key(part, text, tfrom)
+        return res.til if res else None
+
     @functools.lru_cache(maxsize=None)
     def unify_line(self, rule, text, tfrom):
         parts = [s for s in re.split(RE_NONTERMINAL, rule) if s]
         results = []
         for part in parts:
-            if is_symbol(part):
-                res = self.unify_key(part, text, tfrom)
-                if not res: return RuleMatch(val=[], till=0)
-                results.append(res)
-                tfrom = res.til
-            else:
-                if text[tfrom:].startswith(part):
-                    till = tfrom + len(part)
-                    results.append(KeyMatch(part, tfrom, till, None))
-                    tfrom = till
-                else: return RuleMatch(val=[], till=0)
+            res = self.unify_key(part, text, tfrom) if is_symbol(part) else self.literal_match(part, text, tfrom)
+            if not res: return RuleMatch(val=[], till=0)
+            results.append(res)
+            tfrom = res.til
         return RuleMatch(val=results, till=tfrom)
 
     @functools.lru_cache(maxsize=None)
