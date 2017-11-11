@@ -60,8 +60,7 @@ class PEGParser:
     def unify_line(self, rule, text, tfrom):
         parts = [s for s in re.split(RE_NONTERMINAL, rule) if s]
         results = []
-        while parts:
-            part, *parts = parts
+        for part in parts:
             if is_symbol(part):
                 res = self.unify_key(part, text, tfrom)
                 if not res: return RuleMatch(val=[], till=0)
