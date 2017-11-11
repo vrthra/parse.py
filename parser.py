@@ -27,37 +27,34 @@ term_grammar = {
 RE_NONTERMINAL = re.compile(r'(\$[a-zA-Z_]*)')
 
 class PEGParser:
-    def __init__(self, grammar): self.grammar = grammar
+    def __init__(self, grammar):
+        self.grammar = grammar
+        for k, rules in grammar.items():
+            grammar[k] = [tuple(s for s in re.split(RE_NONTERMINAL, rule) if s) for rule in rules]
 
     def literal_match(self, part, text, tfrom):
-        return (part, (tfrom + len(part), None)) if text[tfrom:].startswith(part) else None
-
-    @functools.lru_cache(maxsize=None)
-    def unify_line(self, rule, text, tfrom):
-        def is_symbol(v): return v[0] == '$'
-
-        parts = [s for s in re.split(RE_NONTERMINAL, rule) if s]
-        results = []
-        for part in parts:
-            res = self.unify_key(part, text, tfrom) if is_symbol(part) else self.literal_match(part, text, tfrom)
-            if not res: return None
-            results.append(res)
-            key, (tfrom, ret) = res
-        return (tfrom, results)
+        return (tfrom + len(part), (part, [])) if text[tfrom:].startswith(part) else (tfrom, None)
 
     @functools.lru_cache(maxsize=None)
     def unify_key(self, key, text, tfrom=0):
         rules = self.grammar[key]
         rets = (self.unify_line(rule, text, tfrom) for rule in rules)
-        ret = next((ret for ret in rets if ret), None)
-        return (key, ret) if ret else None
+        tfrom, res = next((ret for ret in rets if ret[1] is not None), (tfrom, None))
+        return (tfrom, (key, res)) if res is not None else (tfrom, None)
+
+    @functools.lru_cache(maxsize=None)
+    def unify_line(self, parts, text, tfrom):
+        def is_symbol(v): return v[0] == '$'
+
+        results = []
+        for part in parts:
+            tfrom, res = self.unify_key(part, text, tfrom) if is_symbol(part) else self.literal_match(part, text, tfrom)
+            if res is None: return tfrom, None
+            results.append(res)
+        return tfrom, results
 
 def using(fn):
     with fn as f: yield f
-
-def stripit(val):
-    k, (t, v) = val
-    return {k: [stripit(i) for i in v]} if v else k
 
 def main(args):
     to_parse, = [f.read().strip() for f in using(open(args[1], 'r'))]
@@ -67,7 +64,7 @@ def main(args):
         grammarstr, = [f.read().strip() for f in using(open(args[2], 'r'))]
         grammar = json.loads(grammarstr)
     result = PEGParser(grammar).unify_key('$START', to_parse)
-    print(stripit(result))
+    print(result[1])
 
 if __name__ == '__main__':
     main(sys.argv)
