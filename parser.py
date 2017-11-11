@@ -30,8 +30,7 @@ class PEGParser:
     def __init__(self, grammar): self.grammar = grammar
 
     def literal_match(self, part, text, tfrom):
-        if not text[tfrom:].startswith(part): return None
-        return (part, (tfrom + len(part), None))
+        return (part, (tfrom + len(part), None)) if text[tfrom:].startswith(part) else None
 
     @functools.lru_cache(maxsize=None)
     def unify_line(self, rule, text, tfrom):
