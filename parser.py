@@ -50,7 +50,8 @@ def main(args):
 
     to_parse = '12 + 34 * 4' #readall(args[1])
     grammar = json.loads(readall(args[2])) if len(args) > 2 else term_grammar
-    for result in Parser(grammar).unify_key('$START', to_parse):
-        print(result)
+    for l,result in Parser(grammar).unify_key('$START', to_parse):
+        if l == len(to_parse):
+            print(result)
 
 if __name__ == '__main__': main(sys.argv)
