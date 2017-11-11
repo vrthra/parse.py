@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # vim: set expandtab:
 import sys
+import json
 import re
 import collections
 import logging as log
@@ -160,12 +161,6 @@ def follow(grammar, start='$START', fdict={}):
     return fdict
 
 class Token: pass
-class Dollar(Token):
-    def __str__(self): return '.$'
-    def __repr__(self): return str(self)
-class Q(Token):
-    def __str__(self): return '.?'
-    def __repr__(self): return str(self)
 
 def is_nonterminal(val):
     """
@@ -175,10 +170,7 @@ def is_nonterminal(val):
     False
     >>> is_nonterminal('$')
     False
-    >>> is_nonterminal(Q())
-    False
     """
-    if type(val) in [Q]: return False
     if not val: return False
     return len(val) > 1 and val[0] == '$'
 
@@ -199,7 +191,6 @@ def symbols(grammar):
             elts = split_production_str(rule)
             all_symbols |= set(elts)
     return all_symbols
-
 
 class PLine:
     cache = {}
@@ -400,8 +391,6 @@ class State:
         State.cache[key] = State(plines, sfrom)
         return State.cache[key]
 
-
-
     def __str__(self):
         return "State(%s):\n\t%s" % (self.i, "\n\t".join([str(i) for i in self.plines]))
 
@@ -597,6 +586,7 @@ def parse(input_text, grammar):
     state_stack = [State.registry[1].i]
     tokens = list(input_text)
     next_token = None
+    tree = []
     while True:
         if not next_token:
             if not tokens:
@@ -623,7 +613,7 @@ def parse(input_text, grammar):
             popped = expr_stack[-pnum:]
             expr_stack = expr_stack[:-pnum]
             # push the lhs symbol of pline
-            expr_stack.append(pline.key)
+            expr_stack.append({pline.key: popped})
             # pop the same number of states.
             print("pop off:%d" % pnum)
             state_stack = state_stack[:-pnum]
@@ -658,7 +648,8 @@ def main(args):
     to_parse, = [f.read().strip() for f in using(open(args[1], 'r'))]
     grammar = term_grammar
     initialize(grammar, '$START')
-    parse(to_parse, grammar)
+    val = parse(to_parse, grammar)
+    print(json.dumps(val))
 
 if __name__ == '__main__':
     main(sys.argv)
