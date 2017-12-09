@@ -54,6 +54,9 @@ class ParseCache:
 
     def drop(self, key):
         self.seen[key] = -1
+        #TODO: we need to indicate our parents are also wrong.
+        # For that, we need to collect all children for each level of parent
+        # and propagate back if all children are wrong
         del self.members[key]
 
     def pop_firsts(self):
@@ -73,6 +76,9 @@ class ParseCache:
     def get_cosleepers(self, orig_key, tfrom):
         # register ourselves so that any future call gets treated the same 
         # way with tfrom and at
+        #TODO: we need to indicate our parents are also right. That is,
+        # any complete (no parts left) parent of a matched co_sleeper should
+        # be marked as having parsed it completely.
         self.seen[orig_key] = tfrom
 
         co_parsed = self.members[orig_key]
