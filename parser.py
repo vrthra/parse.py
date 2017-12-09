@@ -28,13 +28,14 @@ class ParseCache:
         self.__dict__.update(locals())
         self.members = {}
         self.first = {}
+        self.seen = {}
 
     def add_lines(self, lines):
         for l in lines:
             if l.key() in self.members:
                 self.members[l.key()].append(l)
             else:
-                self.members[l.key()] = [l]
+                self.members[l.key()] = [] # first one goes to first
                 self.first[l.key()] = l # get only the first
 
     def shift_up(self):
@@ -42,13 +43,18 @@ class ParseCache:
         self.first = {}
         self.members = {}
         for k,v in members.items():
+            if not v: continue
             _current, *rest = v
             if rest:
-                self.members[k] = rest
+                self.members[k] = rest[1:]
                 self.first[k] = rest[0]
 
     def firsts(self):
         return self.first.values()
+
+    def drop(self, key):
+        self.seen[key] = -1
+        del self.members[key]
 
     def pop_firsts(self):
         self.shift_up()
@@ -56,7 +62,19 @@ class ParseCache:
     def has_remaining(self):
         return len(self.members) > 0
 
+    def has_key(self, key):
+        return key in self.seen
+
+    def get_matched(self, line):
+        if self.seen[line.key()] == -1: return None
+        log("Cached:")
+        return line.parent.copy_on_match(self.seen[line.key()])
+
     def get_cosleepers(self, orig_key, tfrom):
+        # register ourselves so that any future call gets treated the same 
+        # way with tfrom and at
+        self.seen[orig_key] = tfrom
+
         co_parsed = self.members[orig_key]
         # each sleeper will have different parents, otherwise they
         # are all same. We use the current from, becaue the line was matched
@@ -80,19 +98,25 @@ class Line:
         self.myid = Line.__id
         Line.__id +=1
 
-    def xkey(self, tfrom, at_part):
-        return ("[key| %s %d part:%d]" % (str(self.rule), tfrom, at_part))
-
     def key(self):
-        return self.xkey(self.tfrom, self.at_part)
+        return ("[rule:%s from:%d part:%d]" %
+                (str(self.rule), self.tfrom, self.at_part))
 
-    def text_remaining(self): return len(self.text) - self.tfrom - 1
-    #def __eq__(self, o): return (self.rule == o.rule and self.tfrom == o.tfrom and self.text == o.text and self.parent == o.parent)
-    def __str__(self): return "{%d text: %s at: %s parts: %s:%d}"  % (self.myid, self.text, self.tfrom, str(self.parts), self.at_part)
+    def text_remaining(self):
+        return len(self.text) - self.tfrom - 1
+
+    def __str__(self):
+        return ("{%d| rule:%s text:%s from:%d parts:%s: at_part:%d}"  %
+                (self.myid, str(self.rule), self.text[self.tfrom:], self.tfrom, str(self.parts[self.at_part:]), self.at_part))
     def __repr__(self): return str(self)
     def copy_on_match(self, tfrom):
+        log("Retrive[%d] %s:" % (self.myid, self.rule))
         l = Line(self.rule, self.grammar, self.text, tfrom, self.parent)
-        l.at_part = self.at_part + 1
+        l.myid = self.myid
+        # Unlike tfrom we dont have to increment at_part because it would
+        # already have been incremented when the parent started exploring this
+        # nt
+        l.at_part = self.at_part
         return l
 
     def get_part(self):
@@ -114,26 +138,21 @@ class Line:
                 if self.text_eof():
                     assert False
                     return (Line.Matched, [])
-                    return True
                 else: # False match
                     return (Line.NoMatch, [])
+
+            # we matched. So let parent know
+            # from now, the parent will continue matching, but from the
+            # new tfrom. The parent has already dropped the
+            # corresponding part before creating us.
             return (Line.Matched, [self.parent.copy_on_match(self.tfrom)])
+
         # take one step
         part = self.get_part()
-
         if not is_symbol(part):
             if self.text[self.tfrom:].startswith(part):
-                if self.part_eof():
-                    # we matched. So let parent know
-                    # from now, the parent will continue matching, but from the
-                    # new tfrom. The parent has already dropped the
-                    # corresponding part before creating us.
-                    self.tfrom += len(part)
-                    return (Line.Matched, [self.parent.copy_on_match(self.tfrom)])
-                else:
-                    # we need more steps to match. Return ourselves
-                    self.tfrom = self.tfrom + len(part)
-                    return (Line.PartMatch, [self])
+                self.tfrom += len(part)
+                return (Line.Matched, [self])
             else:
                 # failed to match a terminal. drop this line
                 return (Line.NoMatch, [])
@@ -164,26 +183,40 @@ def parse(args, grammar):
     while p.has_remaining():
         new_lines = []
         uniq_rules = p.firsts()
-        for line in uniq_rules:
+        for line in sorted(uniq_rules, key=lambda x: x.text_remaining()):
             log(line)
-            orig_key = line.key()
-            match, children = line.explore()
-            if match == Line.NoMatch:
-                # drop from parse_cache if this was unsuccessful.
-                log("\t\tX %s" % line)
-            elif match in [Line.Explore, Line.PartMatch, Line.Matched]:
-                if  match == Line.Matched:
-                    # line key gets modified after line.explore. So use the last key pos
-                    sleepers = p.get_cosleepers(orig_key, line.tfrom)
-                    new_lines.extend(sleepers)
-                    # successful, get the co-parsed from parse cache, and updte them
-                    # all to new_lines
-                for l in children:
-                    log("> %s" % l)
-                    if l.text_remaining() == 0:
-                        return 'Matched'
-                    # recursion.
-                    new_lines.append(l)
+            if p.has_key(line.key()):
+                # no need to explore. Just match, and add ourparent to
+                # the new_lines
+                parent = p.get_matched(line)
+                if parent:
+                    new_lines.append(parent)
+            else:
+                orig_key = line.key()
+                match, children = line.explore()
+                if match == Line.NoMatch:
+                    # drop from parse_cache if this was unsuccessful.
+                    # TODO: we also want to drop and mark the path this
+                    # particular match took. I.e. all the children and
+                    # grand children
+                    p.drop(orig_key)
+                    log("\t\tX %s" % line)
+                elif match in [Line.Explore, Line.PartMatch, Line.Matched]:
+                    if  match == Line.Matched:
+                        # line key gets modified after line.explore. So use the last key pos
+                        sleepers = p.get_cosleepers(orig_key, line.tfrom)
+
+                        # we need to update the at_part because cosleepers
+                        # went to sleep before match
+                        for i in sleepers:
+                            i.at_part += 1
+                            log("s> %s" % i)
+                        new_lines.extend(sleepers)
+                        # successful, get the co-parsed from parse cache, and updte them
+                        # all to new_lines
+                    for l in children:
+                        log("> %s" % l)
+                        new_lines.append(l)
             pass
         log()
         p.pop_firsts()
