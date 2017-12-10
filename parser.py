@@ -6,119 +6,55 @@ import collections
 
 term_grammar = {
     "$START": ["$FACTOR"],
-#    "$START": ["$EXPR"],
-#    "$EXPR": ["$EXPR + $TERM", "$EXPR - $TERM", "$TERM"],
-#    "$TERM": ["$TERM * $FACTOR", "$TERM / $FACTOR", "$FACTOR"],
-#    "$FACTOR": ["+$FACTOR", "-$FACTOR", "($EXPR)", "$INTEGER", "$INTEGER.$INTEGER"],
+    "$EXPR": ["$EXPR + $TERM", "$EXPR - $TERM", "$TERM"],
+    "$TERM": ["$TERM * $FACTOR", "$TERM / $FACTOR", "$FACTOR"],
     "$FACTOR": ["$INTEGER", "$INTEGER.$INTEGER"],
     "$INTEGER": ["$INTEGER$DIGIT", "$DIGIT"],
-    "$DIGIT": ["0"] #, "1"] #, "2", "3", "4", "5", "6", "7", "8", "9"]
+    "$DIGIT": ["0", "1"] #, "2", "3", "4", "5", "6", "7", "8", "9"]
 }
 
 def is_symbol(x): return x[0] == '$'
 
 def log(v=None):
-    if v:
-        print(v, file=sys.stderr, flush=True)
-    else:
-        print(file=sys.stderr, flush=True)
-
-class ParseCache:
-    def __init__(self):
-        self.__dict__.update(locals())
-        self.members = {}
-        self.first = {}
-        self.seen = {}
-
-    def add_lines(self, lines):
-        for l in lines:
-            if l.key() in self.members:
-                self.members[l.key()].append(l)
-            else:
-                self.members[l.key()] = [] # first one goes to first
-                self.first[l.key()] = l # get only the first
-
-    def shift_up(self):
-        members = self.members
-        self.first = {}
-        self.members = {}
-        for k,v in members.items():
-            if not v: continue
-            _current, *rest = v
-            if rest:
-                self.members[k] = rest[1:]
-                self.first[k] = rest[0]
-
-    def firsts(self):
-        return self.first.values()
-
-    def drop(self, key):
-        self.seen[key] = -1
-        #TODO: we need to indicate our parents are also wrong.
-        # For that, we need to collect all children for each level of parent
-        # and propagate back if all children are wrong
-        del self.members[key]
-
-    def pop_firsts(self):
-        self.shift_up()
-
-    def has_remaining(self):
-        return len(self.members) > 0
-
-    def has_key(self, key):
-        return key in self.seen
-
-    def get_matched(self, line):
-        if self.seen[line.key()] == -1: return None
-        log("Cached:")
-        return line.parent.copy_on_match(self.seen[line.key()])
-
-    def get_cosleepers(self, orig_key, tfrom):
-        # register ourselves so that any future call gets treated the same 
-        # way with tfrom and at
-        #TODO: we need to indicate our parents are also right. That is,
-        # any complete (no parts left) parent of a matched co_sleeper should
-        # be marked as having parsed it completely.
-        self.seen[orig_key] = tfrom
-
-        co_parsed = self.members[orig_key]
-        # each sleeper will have different parents, otherwise they
-        # are all same. We use the current from, becaue the line was matched
-        # just now.
-        # use the tfrom of the current line because it contains the
-        # length of part matched.
-        return [x.parent.copy_on_match(tfrom) for x in co_parsed]
+    if v: print(v, file=sys.stderr, flush=True)
+    else: print(file=sys.stderr, flush=True)
 
 class Line:
     NoMatch = 0
     Matched = 1
     PartMatch = 2
-    Explore = 3
+    RuleMatch = 3
+    Explore = 4
 
     __id = 0
-    parse_cache = {}
+    register = {}
+
     def __init__(self, rule, grammar, text, tfrom, parent):
         self.__dict__.update(locals())
         self.parts = self.rule
         self.at_part = 0
         self.myid = Line.__id
         Line.__id +=1
+        Line.register[self.myid] = self
+        self._key = "[rule:%s from:%d]" % (str(self.rule), self.tfrom)
 
     def key(self):
-        return ("[rule:%s from:%d part:%d]" %
-                (str(self.rule), self.tfrom, self.at_part))
+        return self._key
 
     def text_remaining(self):
         return len(self.text) - self.tfrom - 1
 
     def __str__(self):
-        return ("{%d| rule:%s text:%s from:%d parts:%s: at_part:%d}"  %
-                (self.myid, str(self.rule), self.text[self.tfrom:], self.tfrom, str(self.parts[self.at_part:]), self.at_part))
+        return "%d:%s (%s)" %(self.myid, self.key(), self.text[self.tfrom:])
+        #return ("{%d| rule:%s text:%s from:%d parts:%s: at_part:%d}"  %
+        #        (self.myid, str(self.rule), self.text[self.tfrom:], self.tfrom,
+        #         str(self.parts[self.at_part:]), self.at_part))
     def __repr__(self): return str(self)
     def copy_on_match(self, tfrom):
-        log("Retrive[%d] %s:" % (self.myid, self.rule))
+        #log("Retrive[%d] %s:" % (self.myid, self.rule))
         l = Line(self.rule, self.grammar, self.text, tfrom, self.parent)
         l.myid = self.myid
+        l.key = self.key
         # Unlike tfrom we dont have to increment at_part because it would
         # already have been incremented when the parent started exploring this
         # nt
@@ -142,7 +78,6 @@ class Line:
             if not self.parent:
                 # have we exhausted the text?
                 if self.text_eof():
-                    assert False
                     return (Line.Matched, [])
                 else: # False match
                     return (Line.NoMatch, [])
@@ -151,14 +86,14 @@ class Line:
             # from now, the parent will continue matching, but from the
             # new tfrom. The parent has already dropped the
             # corresponding part before creating us.
-            return (Line.Matched, [self.parent.copy_on_match(self.tfrom)])
+            return (Line.RuleMatch, [self.parent.copy_on_match(self.tfrom)])
 
         # take one step
         part = self.get_part()
         if not is_symbol(part):
             if self.text[self.tfrom:].startswith(part):
                 self.tfrom += len(part)
-                return (Line.Matched, [self])
+                return (Line.PartMatch, [self])
             else:
                 # failed to match a terminal. drop this line
                 return (Line.NoMatch, [])
@@ -170,8 +105,105 @@ class Line:
 
 # Should return lines
 def unify(key, grammar, text, tfrom=0, parent=None):
-    rules = grammar[key]
-    return [Line(rule, grammar, text, tfrom, parent) for rule in rules]
+    return [Line(rule, grammar, text, tfrom, parent) for rule in grammar[key]]
+
+def add_to_rules(my_line, my_lines, my_rules, my_sleepers):
+    l_key = my_line.key()
+    if l_key in my_rules:
+        # if a similar rule is under consideration, add ourselves to
+        # sleepers.
+        if l_key in my_sleepers:
+            my_sleepers[l_key].add(my_line)
+        else:
+            my_sleepers[l_key] = set([my_line])
+    else:
+        my_lines.append(my_line)
+        my_rules.add(l_key)
+
+def wake_up_cosleepers(line, lines, current_rules, sleepers):
+    if line.key() not in sleepers:
+        return
+    my_sleepers = sleepers[line.key()]
+    del sleepers[line.key()]
+    for co_sleeper in my_sleepers:
+        log("waking %s: %d" % (line.key(), co_sleeper.myid))
+        l = co_sleeper.parent.copy_on_match(line.tfrom)
+        log("%d: %d > %s" % (line.myid, co_sleeper.myid, l))
+        add_to_rules(l, lines, current_rules, sleepers)
+        wake_up_cosleepers(co_sleeper, lines, current_rules, sleepers)
+
+def parse(args, grammar):
+    lines = unify('$START', processed(grammar), to_parse)
+    sleepers = {}
+    current_rules = set([l.key() for l in lines])
+    register_children = {}
+    answers = {}
+    while lines:
+        line, *lines = lines
+        line_key = line.key()
+        current_rules.remove(line_key)
+        log(line)
+        match, children = line.explore()
+        if match == Line.Matched:
+            log("matched")
+            return
+
+        elif match == Line.PartMatch:
+            # nothing to do. Just another step.
+            assert len(children) == 1
+            _line = children[0]
+            log("partmatch.")
+            add_to_rules(_line, lines, current_rules, sleepers)
+
+        elif match == Line.RuleMatch:
+            answers[line.key()] = line.tfrom
+            # wake the sleepers, and add their parents because the
+            # cosleepers matched.
+            wake_up_cosleepers(line, lines, current_rules, sleepers)
+
+            assert len(children) == 1
+            _line = children[0]
+            add_to_rules(_line, lines, current_rules, sleepers)
+
+        elif match == Line.Explore:
+            if line_key not in register_children:
+                register_children[line_key] = len(children)
+            for l in children:
+                l_key = l.key()
+                if l_key in answers:
+                    # if we already know the answer, dont bother.
+                    if answers[l.key()] != -1:
+                        log("had_an_answer for %s" % l.key())
+                        ln = line.parent.copy_on_match(answers[l_key])
+                        log(".%s" % ln)
+                        wake_up_cosleepers(ln, lines, current_rules, sleepers)
+                        add_to_rules(ln, lines, current_rules, sleepers)
+                    else:
+                        # no match
+                        if l_key in sleepers:
+                            del sleepers[l_key]
+                        log("\t\tcX %s" % l)
+                else:
+                    log("> %s" % l)
+                    add_to_rules(l, lines, current_rules, sleepers)
+
+        elif match == Line.NoMatch:
+            # we need to be careful here. We can do this only if we
+            # know that all children of line, and their children failed to
+            # match.
+            if line_key in register_children:
+                register_children[line_key] -= 1
+                if register_children[line_key] == 0:
+                    answers[line.key()] = -1
+            else:
+                answers[line.key()] = -1
+            # and drop the sleepers
+            if line_key in sleepers:
+                del sleepers[line_key]
+            log("\t\tX %s" % line)
+
+        log()
+    return None
 
 def using(fn):
     with fn as f: yield f
@@ -183,51 +215,6 @@ def processed(grammar):
         new_grammar[k] = [[s for s in re.split(RE_NONTERMINAL, rule) if s] for rule in rules]
     return new_grammar
 
-def parse(args, grammar):
-    p = ParseCache()
-    p.add_lines(unify('$START', processed(grammar), to_parse))
-    while p.has_remaining():
-        new_lines = []
-        uniq_rules = p.firsts()
-        for line in sorted(uniq_rules, key=lambda x: x.text_remaining()):
-            log(line)
-            if p.has_key(line.key()):
-                # no need to explore. Just match, and add ourparent to
-                # the new_lines
-                parent = p.get_matched(line)
-                if parent:
-                    new_lines.append(parent)
-            else:
-                orig_key = line.key()
-                match, children = line.explore()
-                if match == Line.NoMatch:
-                    # drop from parse_cache if this was unsuccessful.
-                    # TODO: we also want to drop and mark the path this
-                    # particular match took. I.e. all the children and
-                    # grand children
-                    p.drop(orig_key)
-                    log("\t\tX %s" % line)
-                elif match in [Line.Explore, Line.PartMatch, Line.Matched]:
-                    if  match == Line.Matched:
-                        # line key gets modified after line.explore. So use the last key pos
-                        sleepers = p.get_cosleepers(orig_key, line.tfrom)
-
-                        # we need to update the at_part because cosleepers
-                        # went to sleep before match
-                        for i in sleepers:
-                            i.at_part += 1
-                            log("s> %s" % i)
-                        new_lines.extend(sleepers)
-                        # successful, get the co-parsed from parse cache, and updte them
-                        # all to new_lines
-                    for l in children:
-                        log("> %s" % l)
-                        new_lines.append(l)
-            pass
-        log()
-        p.pop_firsts()
-        p.add_lines(new_lines)
-    return None
 
 if __name__ == '__main__':
     to_parse, = [f.read().strip() for f in using(open(sys.argv[1], 'r'))]
